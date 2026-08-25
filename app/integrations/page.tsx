@@ -74,7 +74,7 @@ export default async function Integrations() {
           ]}
         />
         <Integration
-          name="OpenAI"
+          name={ai.configuredProvider === "GROQ" ? "Groq" : "OpenAI"}
           icon={<Bot />}
           connected={ai.status !== "not-configured"}
           badge={
@@ -87,7 +87,7 @@ export default async function Integrations() {
           description={
             ai.status === "not-configured"
               ? "Deterministic Recovery Engine — zero-config fallback active"
-              : "OpenAI structured recovery intelligence — Guardian remains authoritative"
+              : `${ai.provider} structured recovery intelligence — Guardian remains authoritative`
           }
           rows={[
             ["AI Provider", ai.provider],
@@ -104,7 +104,7 @@ export default async function Integrations() {
             ],
             ["Guardian", "Active and deterministic"],
           ]}
-          env={["OPENAI_API_KEY", "OPENAI_MODEL"]}
+          env={ai.requiredEnvironment}
         />
         <Integration
           name="Notifications"

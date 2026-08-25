@@ -1,27 +1,47 @@
 import {
-  configuredOpenAIModel,
-  openAIConfigured,
-} from "../lib/ai/openai-client";
+  aiProviderConfigured,
+  aiProviderKeyName,
+  configuredAIModel,
+  configuredAIProvider,
+  hostedAIProviderName,
+  type HostedAIProvider,
+} from "../lib/ai/ai-provider-client";
 import { databaseConfigured, getPrisma } from "../lib/db/prisma";
 
 export interface AIIntegrationStatus {
-  provider: "OpenAI" | "Deterministic Recovery Engine";
+  provider: "Groq" | "OpenAI" | "Deterministic Recovery Engine";
+  configuredProvider: HostedAIProvider;
   status: "connected" | "not-configured" | "degraded";
-  model?: string;
+  model: string;
   fallbackEnabled: true;
   recentAIDecisions: number;
   fallbackDecisions: number;
   lastSuccessfulAIDecision?: string;
+  requiredEnvironment: string[];
 }
 
 export async function getAIIntegrationStatus(): Promise<AIIntegrationStatus> {
-  const configured = openAIConfigured();
+  const configuredProvider = configuredAIProvider();
+  const configured = aiProviderConfigured(configuredProvider);
+  const model = configuredAIModel(configuredProvider);
+  const provider: AIIntegrationStatus["provider"] = configured
+      ? hostedAIProviderName(configuredProvider)
+      : "Deterministic Recovery Engine";
+  const base = {
+    provider,
+    configuredProvider,
+    model,
+    fallbackEnabled: true as const,
+    requiredEnvironment: [
+      "AI_PROVIDER",
+      aiProviderKeyName(configuredProvider),
+      configuredProvider === "GROQ" ? "GROQ_MODEL" : "OPENAI_MODEL",
+    ],
+  };
   if (!databaseConfigured())
     return {
-      provider: configured ? "OpenAI" : "Deterministic Recovery Engine",
+      ...base,
       status: configured ? "connected" : "not-configured",
-      model: configured ? configuredOpenAIModel() : undefined,
-      fallbackEnabled: true,
       recentAIDecisions: 0,
       fallbackDecisions: 0,
     };
@@ -29,18 +49,18 @@ export async function getAIIntegrationStatus(): Promise<AIIntegrationStatus> {
   const [recentAIDecisions, fallbackDecisions, lastSuccess, lastFallback] =
     await Promise.all([
       prisma.recoveryDecision.count({
-        where: { decisionProvider: "OPENAI" },
+        where: { decisionProvider: configuredProvider },
       }),
       prisma.recoveryDecision.count({
-        where: { fallbackReason: { not: null } },
+        where: { fallbackReason: { not: null }, model },
       }),
       prisma.recoveryDecision.findFirst({
-        where: { decisionProvider: "OPENAI" },
+        where: { decisionProvider: configuredProvider },
         orderBy: { createdAt: "desc" },
         select: { createdAt: true },
       }),
       prisma.recoveryDecision.findFirst({
-        where: { fallbackReason: { not: null } },
+        where: { fallbackReason: { not: null }, model },
         orderBy: { createdAt: "desc" },
         select: { createdAt: true },
       }),
@@ -51,10 +71,8 @@ export async function getAIIntegrationStatus(): Promise<AIIntegrationStatus> {
       (!lastSuccess || lastFallback.createdAt > lastSuccess.createdAt),
   );
   return {
-    provider: configured ? "OpenAI" : "Deterministic Recovery Engine",
+    ...base,
     status: configured ? (degraded ? "degraded" : "connected") : "not-configured",
-    model: configured ? configuredOpenAIModel() : undefined,
-    fallbackEnabled: true,
     recentAIDecisions,
     fallbackDecisions,
     lastSuccessfulAIDecision: lastSuccess?.createdAt.toISOString(),

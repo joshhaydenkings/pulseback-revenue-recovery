@@ -4,19 +4,19 @@
 
 > Failed does not mean lost.
 
-PulseBack turns failed-payment events into persistent recovery cases. OpenAI can diagnose the failure and recommend one bounded strategy; the deterministic Guardian remains the only authority that can approve, require merchant review, or block an action.
+PulseBack turns failed-payment events into persistent recovery cases. A hosted AI provider can diagnose the failure and recommend one bounded strategy; the deterministic Guardian remains the only authority that can approve, require merchant review, or block an action. Groq is the default hosted provider, with OpenAI retained as an optional alternative.
 
 Built for the Razorpay AI Buildathon — Track 03: AI Revenue Recovery.
 
 ## Authority model
 
-**OpenAI recommends → Guardian authorizes → merchant or provider adapter acts**
+**Hosted AI recommends → Guardian authorizes → merchant or provider adapter acts**
 
-OpenAI never executes a payment operation, bypasses policy, changes money, or controls funds. If OpenAI is not configured, times out, is rate-limited, returns invalid structured output, or fails, PulseBack persists an explicit fallback reason and continues through the deterministic engine.
+AI never executes a payment operation, bypasses policy, changes money, or controls funds. If the selected provider is not configured, times out, is rate-limited, returns invalid structured output, or fails, PulseBack persists an explicit fallback reason and continues through the deterministic engine.
 
 ## What is real
 
-- OpenAI Responses API calls use a server-only client and strict structured output.
+- Groq uses its OpenAI-compatible Responses API through a server-only client and strict structured output. OpenAI remains selectable.
 - Minimal structured context excludes customer name, email, phone, secrets, raw webhook payloads, and full card/payment identifiers.
 - Provider text is untrusted data; instruction-like content is omitted and raised as a risk flag.
 - Every recommendation, provider/model identity, fallback reason, Guardian result, action, and webhook outcome is persisted and audited.
@@ -26,7 +26,7 @@ OpenAI never executes a payment operation, bypasses policy, changes money, or co
 
 ## Safe fallback
 
-- Missing OpenAI key: `NOT_CONFIGURED` deterministic fallback.
+- Missing selected-provider key: `NOT_CONFIGURED` deterministic fallback.
 - Timeout, rate limit, malformed schema, or API failure: explicit persisted fallback reason.
 - Missing Razorpay Test credentials: clearly labeled mock provider.
 - Missing `DATABASE_URL` with `DEMO_MODE=true`: clearly labeled in-memory demo repository.
@@ -46,16 +46,25 @@ npm run dev:postgres
 
 Open `http://localhost:3000`. See [SETUP.md](./SETUP.md) for exact environment and webhook setup.
 
-## Optional OpenAI configuration
+## Optional hosted AI configuration
 
 Add server-only values to `.env.local`:
 
 ```text
-OPENAI_API_KEY
-OPENAI_MODEL
+AI_PROVIDER=groq
+GROQ_API_KEY
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
-`OPENAI_MODEL` defaults to `gpt-5-mini`. Never prefix either variable with `NEXT_PUBLIC_`. Recovery Lab remains deterministic and does not call OpenAI.
+To use OpenAI instead:
+
+```text
+AI_PROVIDER=openai
+OPENAI_API_KEY
+OPENAI_MODEL=gpt-5-mini
+```
+
+Never prefix provider keys with `NEXT_PUBLIC_`. Recovery Lab remains deterministic and does not call hosted AI.
 
 ## Razorpay Test configuration
 
@@ -87,7 +96,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-Tests use injected fake OpenAI response boundaries; they never consume API credits. A live AI request is available only through the Demo Console when a key is configured.
+Tests use injected fake provider response boundaries; they never consume API credits. A live AI request is available only through the Demo Console when a key is configured.
 
 ## Main routes
 
@@ -96,12 +105,12 @@ Tests use injected fake OpenAI response boundaries; they never consume API credi
 | `/` | Database-backed recovery overview |
 | `/recoveries` | Persistent recovery queue |
 | `/recoveries/[id]` | Provider evidence, AI analysis, Guardian result, actions, timeline |
-| `/integrations` | Safe Razorpay and OpenAI status without secrets |
+| `/integrations` | Safe Razorpay and hosted-AI status without secrets |
 | `/demo` | Stateful scenarios, Live AI toggle, and synthetic AI decision test |
 | `/demo/checkout` | Razorpay Test Order and Standard Checkout |
 | `/audit` | Persistent append-oriented audit trail |
 | `/policies` | Persistent Guardian and operating mode |
-| `/lab` | Deterministic synthetic benchmark; no OpenAI call |
+| `/lab` | Deterministic synthetic benchmark; no hosted-AI call |
 
 ## Still simulated or deferred
 
@@ -109,6 +118,6 @@ Tests use injected fake OpenAI response boundaries; they never consume API credi
 - Live Razorpay credentials and real money movement
 - Authentication, merchant onboarding, and multi-tenant isolation
 - Seeded demo cases and Recovery Lab inputs are synthetic
-- OpenAI is optional and falls back safely when unavailable
+- Hosted AI is optional and falls back safely when unavailable
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DEMO_SCRIPT.md](./DEMO_SCRIPT.md), and [JUDGING_NOTES.md](./JUDGING_NOTES.md).

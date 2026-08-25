@@ -766,7 +766,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           lastContactAt: customerHistory?.lastContactAt?.toISOString(),
         };
         const baselineDecision = buildDeterministicDecision(input.type, memory);
-        const useOpenAI =
+        const useAI =
           input.provider === "RAZORPAY" || input.useLiveAI === true;
         const context = buildRecoveryDecisionContext({
           transaction: {
@@ -802,7 +802,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           policies,
           riskFlags: [],
         });
-        const analysis = await resolveRecoveryDecision(context, { useOpenAI });
+        const analysis = await resolveRecoveryDecision(context, { useAI });
         const decision = {
           ...analysis.decision,
           riskFlags: [
@@ -972,28 +972,28 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           `${caseId} entered the persistent recovery pipeline.`,
           { paymentId },
         );
-        if (useOpenAI)
+        if (useAI)
           await this.createAudit(
             tx,
             caseId,
             "DECISION",
-            "OPENAI_ANALYSIS_REQUESTED",
+            "AI_ANALYSIS_REQUESTED",
             "PULSEBACK_AI",
-            "OpenAI recovery analysis was requested using a minimal, structured context.",
-            { model: analysis.model },
+            `${analysis.requestedProvider === "GROQ" ? "Groq" : "OpenAI"} recovery analysis was requested using a minimal, structured context.`,
+            { model: analysis.model, provider: analysis.requestedProvider },
           );
         await this.createAudit(
           tx,
           caseId,
           "DECISION",
-          analysis.provider === "OPENAI"
-            ? "OPENAI_RECOMMENDATION_CREATED"
+          analysis.provider !== "DETERMINISTIC"
+            ? `${analysis.provider}_RECOMMENDATION_CREATED`
             : analysis.fallbackReason
-              ? "OPENAI_FALLBACK_USED"
+              ? "AI_FALLBACK_USED"
               : "DETERMINISTIC_AUTOPSY_COMPLETED",
           "PULSEBACK_AI",
           analysis.fallbackReason
-            ? "OpenAI decision unavailable. Deterministic recovery engine used."
+            ? `${analysis.requestedProvider === "GROQ" ? "Groq" : "OpenAI"} decision unavailable. Deterministic recovery engine used.`
             : decision.merchantExplanation,
           {
             decisionProvider: analysis.provider,
@@ -1009,7 +1009,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           "GUARDIAN",
           `GUARDIAN_${guardian.decision}`,
           "GUARDIAN",
-          `${guardian.decision === "APPROVED" ? "Guardian approved" : guardian.decision === "BLOCKED" ? "Guardian blocked" : "Guardian requires approval for"} ${analysis.provider === "OPENAI" ? "OpenAI" : "deterministic"} recommendation. ${guardian.reasons.join(" · ")}`,
+          `${guardian.decision === "APPROVED" ? "Guardian approved" : guardian.decision === "BLOCKED" ? "Guardian blocked" : "Guardian requires approval for"} ${analysis.provider === "GROQ" ? "Groq" : analysis.provider === "OPENAI" ? "OpenAI" : "deterministic"} recommendation. ${guardian.reasons.join(" · ")}`,
           { policies, decisionProvider: analysis.provider } as unknown as Prisma.InputJsonValue,
         );
         await markProcessed();
@@ -1124,7 +1124,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       riskFlags: domain.riskFlags,
     });
     const analysis = await resolveRecoveryDecision(context, {
-      useOpenAI: true,
+      useAI: true,
     });
     const decision = {
       ...analysis.decision,
@@ -1223,12 +1223,12 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
         tx,
         caseId,
         "DECISION",
-        analysis.provider === "OPENAI"
-          ? "OPENAI_REANALYSIS_COMPLETED"
+        analysis.provider !== "DETERMINISTIC"
+          ? `${analysis.provider}_REANALYSIS_COMPLETED`
           : "REANALYSIS_FALLBACK_USED",
         "PULSEBACK_AI",
         analysis.fallbackReason
-          ? "OpenAI decision unavailable. Deterministic recovery engine used."
+          ? `${analysis.requestedProvider === "GROQ" ? "Groq" : "OpenAI"} decision unavailable. Deterministic recovery engine used.`
           : decision.merchantExplanation,
         {
           decisionProvider: analysis.provider,
@@ -1255,8 +1255,8 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       ok: true,
       case: updated,
       message:
-        analysis.provider === "OPENAI"
-          ? "OpenAI re-analysis persisted. Guardian evaluated it; no action executed automatically."
+        analysis.provider !== "DETERMINISTIC"
+          ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} re-analysis persisted. Guardian evaluated it; no action executed automatically.`
           : "Deterministic fallback re-analysis persisted. No action executed automatically.",
     };
   }

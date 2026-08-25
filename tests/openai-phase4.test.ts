@@ -10,6 +10,11 @@ import {
   type OpenAIResponseBoundary,
 } from "../lib/ai/decision-engine";
 import {
+  aiProviderConfigured,
+  configuredAIModel,
+  configuredAIProvider,
+} from "../lib/ai/ai-provider-client";
+import {
   buildRecoveryDecisionContext,
   type RecoveryDecisionContext,
 } from "../lib/ai/recovery-decision-context";
@@ -82,7 +87,32 @@ function clientWith(value: unknown): OpenAIResponseBoundary {
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe("Phase 4 OpenAI recovery intelligence", () => {
+describe("Phase 4 hosted recovery intelligence", () => {
+  it("uses Groq as the default hosted provider and honors its configuration", () => {
+    vi.stubEnv("AI_PROVIDER", "groq");
+    vi.stubEnv("GROQ_API_KEY", "test-key-not-a-real-secret");
+    vi.stubEnv("GROQ_MODEL", "openai/gpt-oss-20b");
+    expect(configuredAIProvider()).toBe("GROQ");
+    expect(aiProviderConfigured()).toBe(true);
+    expect(configuredAIModel()).toBe("openai/gpt-oss-20b");
+  });
+
+  it("accepts Groq structured output and records Groq provider metadata", async () => {
+    const result = await resolveRecoveryDecision(context(), {
+      useAI: true,
+      provider: "GROQ",
+      aiClient: clientWith(validDecision),
+      model: "openai/gpt-oss-20b",
+    });
+    expect(result.provider).toBe("GROQ");
+    expect(result.model).toBe("openai/gpt-oss-20b");
+    expect(result.decision).toMatchObject({
+      recommendedAction: "CREATE_PAYMENT_LINK",
+      decisionProvider: "GROQ",
+      confidence: 0.84,
+    });
+  });
+
   it("accepts strict structured output and records provider metadata", async () => {
     const result = await resolveRecoveryDecision(context(), {
       useOpenAI: true,

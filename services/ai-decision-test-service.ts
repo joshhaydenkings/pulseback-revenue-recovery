@@ -55,7 +55,7 @@ export async function analyzeAIDecisionTestScenario(
     },
     policies,
   });
-  const analysis = await resolveRecoveryDecision(context, { useOpenAI: true });
+  const analysis = await resolveRecoveryDecision(context, { useAI: true });
   const decision = {
     ...analysis.decision,
     riskFlags: [

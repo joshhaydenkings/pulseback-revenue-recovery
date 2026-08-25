@@ -9,11 +9,13 @@ import type {
 import type { SimulatorEventType } from "../../repositories/types";
 import { buildDeterministicDecision } from "../../services/deterministic-recovery";
 import {
-  configuredOpenAIModel,
-  getOpenAIClient,
-  openAIConfigured,
-  openAIRequestTimeoutMs,
-} from "./openai-client";
+  aiProviderConfigured,
+  aiRequestTimeoutMs,
+  configuredAIModel,
+  configuredAIProvider,
+  getHostedAIClient,
+  type HostedAIProvider,
+} from "./ai-provider-client";
 import type { RecoveryDecisionContext } from "./recovery-decision-context";
 
 export const recoveryDecisionSchema = z
@@ -58,7 +60,8 @@ export type DecisionFallbackReason = NonNullable<
 
 export interface ResolvedRecoveryDecision {
   decision: RecoveryDecision;
-  provider: "OPENAI" | "DETERMINISTIC";
+  provider: HostedAIProvider | "DETERMINISTIC";
+  requestedProvider?: HostedAIProvider;
   model?: string;
   fallbackReason?: DecisionFallbackReason;
 }
@@ -130,13 +133,14 @@ export class DeterministicDecisionEngine
   }
 }
 
-export class OpenAIRecoveryDecisionEngine
+export class HostedRecoveryDecisionEngine
   implements RecoveryDecisionEngine
 {
   constructor(
     private readonly client: OpenAIResponseBoundary =
-      getOpenAIClient() as unknown as OpenAIResponseBoundary,
-    readonly model = configuredOpenAIModel(),
+      getHostedAIClient() as unknown as OpenAIResponseBoundary,
+    readonly model = configuredAIModel(),
+    readonly provider: HostedAIProvider = configuredAIProvider(),
   ) {}
 
   async decide(context: RecoveryDecisionContext): Promise<RecoveryDecision> {
@@ -161,9 +165,9 @@ export class OpenAIRecoveryDecisionEngine
             "pulseback_recovery_decision",
           ),
         },
-        store: false,
+        ...(this.provider === "OPENAI" ? { store: false } : {}),
       },
-      { timeout: openAIRequestTimeoutMs },
+      { timeout: aiRequestTimeoutMs },
     );
     const candidate =
       response.output_parsed ??
@@ -172,9 +176,37 @@ export class OpenAIRecoveryDecisionEngine
     return {
       ...parsed,
       waitMinutes: parsed.suggestedWaitMinutes ?? undefined,
-      decisionProvider: "OPENAI",
+      decisionProvider: this.provider,
       model: this.model,
     };
+  }
+}
+
+export class OpenAIRecoveryDecisionEngine extends HostedRecoveryDecisionEngine {
+  constructor(
+    client?: OpenAIResponseBoundary,
+    model = configuredAIModel("OPENAI"),
+  ) {
+    super(
+      client ??
+        (getHostedAIClient("OPENAI") as unknown as OpenAIResponseBoundary),
+      model,
+      "OPENAI",
+    );
+  }
+}
+
+export class GroqRecoveryDecisionEngine extends HostedRecoveryDecisionEngine {
+  constructor(
+    client?: OpenAIResponseBoundary,
+    model = configuredAIModel("GROQ"),
+  ) {
+    super(
+      client ??
+        (getHostedAIClient("GROQ") as unknown as OpenAIResponseBoundary),
+      model,
+      "GROQ",
+    );
   }
 }
 
@@ -195,39 +227,56 @@ function classifyFallback(error: unknown): DecisionFallbackReason {
 export async function resolveRecoveryDecision(
   context: RecoveryDecisionContext,
   options: {
-    useOpenAI: boolean;
+    useAI?: boolean;
+    useOpenAI?: boolean;
+    provider?: HostedAIProvider;
+    aiClient?: OpenAIResponseBoundary;
     openAIClient?: OpenAIResponseBoundary;
     model?: string;
   },
 ): Promise<ResolvedRecoveryDecision> {
   const deterministic = new DeterministicDecisionEngine();
-  if (!options.useOpenAI)
+  if (!(options.useAI ?? options.useOpenAI ?? false))
     return {
       decision: await deterministic.decide(context),
       provider: "DETERMINISTIC",
     };
-  if (!openAIConfigured() && !options.openAIClient) {
+  const injectedClient = options.aiClient ?? options.openAIClient;
+  const provider =
+    options.provider ??
+    (options.openAIClient && !options.aiClient
+      ? "OPENAI"
+      : configuredAIProvider());
+  if (!aiProviderConfigured(provider) && !injectedClient) {
     const decision = await deterministic.decide(context);
     return {
       decision: { ...decision, fallbackReason: "NOT_CONFIGURED" },
       provider: "DETERMINISTIC",
+      requestedProvider: provider,
       fallbackReason: "NOT_CONFIGURED",
     };
   }
-  const model = options.model ?? configuredOpenAIModel();
+  const model = options.model ?? configuredAIModel(provider);
   try {
-    const engine = new OpenAIRecoveryDecisionEngine(
-      options.openAIClient ??
-        (getOpenAIClient() as unknown as OpenAIResponseBoundary),
+    const engine = new HostedRecoveryDecisionEngine(
+      injectedClient ??
+        (getHostedAIClient(provider) as unknown as OpenAIResponseBoundary),
       model,
+      provider,
     );
-    return { decision: await engine.decide(context), provider: "OPENAI", model };
+    return {
+      decision: await engine.decide(context),
+      provider,
+      requestedProvider: provider,
+      model,
+    };
   } catch (error) {
     const reason = classifyFallback(error);
     const decision = await deterministic.decide(context);
     return {
       decision: { ...decision, fallbackReason: reason },
       provider: "DETERMINISTIC",
+      requestedProvider: provider,
       model,
       fallbackReason: reason,
     };

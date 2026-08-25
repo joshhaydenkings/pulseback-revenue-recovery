@@ -18,7 +18,10 @@ export default async function Demo() {
           </a>
         }
       />
-      <DemoConsole aiConfigured={ai.status !== "not-configured"} />
+      <DemoConsole
+        aiConfigured={ai.status !== "not-configured"}
+        aiProvider={ai.configuredProvider}
+      />
     </AppShell>
   );
 }

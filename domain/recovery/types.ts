@@ -67,7 +67,7 @@ export interface RecoveryDecision {
   riskFlags: string[];
   customerFriction?: "LOW" | "MEDIUM" | "HIGH";
   urgency?: "LOW" | "MEDIUM" | "HIGH";
-  decisionProvider?: "OPENAI" | "DETERMINISTIC";
+  decisionProvider?: "GROQ" | "OPENAI" | "DETERMINISTIC";
   model?: string;
   fallbackReason?:
     | "NOT_CONFIGURED"

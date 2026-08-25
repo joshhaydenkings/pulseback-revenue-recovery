@@ -2,12 +2,12 @@
 
 ## Trust and authority boundaries
 
-1. Razorpay and OpenAI secrets exist only in server configuration and adapters.
+1. Razorpay and hosted-AI secrets exist only in server configuration and adapters.
 2. Raw Razorpay webhook bytes are authenticated before parsing or mutation.
 3. Razorpay and simulator events normalize into one `RecoveryEventInput` pipeline.
 4. AI receives a small `RecoveryDecisionContext`, not raw database rows or webhook payloads.
 5. Provider strings are untrusted, length-limited, identifier-redacted data. Instruction-like text is omitted and flagged.
-6. OpenAI produces a strict `RecoveryDecision`; it does not execute actions or control funds.
+6. The selected hosted provider produces a strict `RecoveryDecision`; it does not execute actions or control funds.
 7. Deterministic Guardian evaluates every recommendation after AI and before execution.
 8. PostgreSQL idempotency and transactional state changes remain authoritative.
 
@@ -17,7 +17,7 @@
 flowchart LR
   E[Signed Razorpay or Demo event] --> N[Normalize and claim idempotency]
   N --> C[Build minimal safe decision context]
-  C --> O{OpenAI configured?}
+  C --> O{Hosted AI configured?}
   O -->|Yes| R[Responses API structured decision]
   O -->|No or failure| F[Deterministic fallback + reason]
   R --> G[Deterministic Guardian]
@@ -30,7 +30,7 @@ flowchart LR
 
 The resolver classifies `NOT_CONFIGURED`, `TIMEOUT`, `RATE_LIMIT`, `INVALID_RESPONSE`, and `API_ERROR`. The fallback decision goes through the same Guardian and persistence path.
 
-## Data sent to OpenAI
+## Data sent to the hosted AI provider
 
 - Transaction amount in paise, currency, coarse payment method, normalized failure evidence, attempt count, and elapsed time
 - Internal opaque customer ID and aggregate payment/recovery/contact/fatigue counts
@@ -51,4 +51,4 @@ Excluded: names, email, phone, card data, full provider identifiers, API keys, w
 - Atomic action execution claim
 - Exact link, reference, and paise amount required before recovery is counted
 - Late authorization cancels pending contact and marks self-recovery
-- OpenAI never runs inside the action executor or Recovery Lab
+- Hosted AI never runs inside the action executor or Recovery Lab

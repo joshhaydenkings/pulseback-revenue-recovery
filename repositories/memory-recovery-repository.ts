@@ -423,7 +423,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       policies: this.policies,
     });
     const analysis = await this.decisionResolver(context, {
-      useOpenAI: input.provider === "RAZORPAY" || input.useLiveAI === true,
+      useAI: input.provider === "RAZORPAY" || input.useLiveAI === true,
     });
     const decision = {
       ...analysis.decision,
@@ -501,14 +501,14 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     this.timeline(
       recovery,
       "PULSEBACK_AI",
-      analysis.provider === "OPENAI"
-        ? "OpenAI Payment Autopsy completed"
+      analysis.provider !== "DETERMINISTIC"
+        ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} Payment Autopsy completed`
         : analysis.fallbackReason
-          ? "OpenAI fallback used"
+          ? "AI fallback used"
           : "Deterministic Payment Autopsy completed",
       "ai",
       analysis.fallbackReason
-        ? "OpenAI decision unavailable. Deterministic recovery engine used."
+        ? `${analysis.requestedProvider === "GROQ" ? "Groq" : "OpenAI"} decision unavailable. Deterministic recovery engine used.`
         : decision.merchantExplanation,
     );
     this.timeline(
@@ -595,7 +595,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       riskFlags: recovery.riskFlags,
     });
     const analysis = await this.decisionResolver(context, {
-      useOpenAI: true,
+      useAI: true,
     });
     const decision = {
       ...analysis.decision,
@@ -654,8 +654,8 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     this.timeline(
       recovery,
       "PULSEBACK_AI",
-      analysis.provider === "OPENAI"
-        ? "OpenAI re-analysis completed"
+      analysis.provider !== "DETERMINISTIC"
+        ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} re-analysis completed`
         : "Rules fallback re-analysis completed",
       "ai",
       decision.merchantExplanation,
@@ -682,8 +682,8 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       ok: true,
       case: recovery,
       message:
-        analysis.provider === "OPENAI"
-          ? "OpenAI re-analysis persisted. Guardian evaluated it; no action executed automatically."
+        analysis.provider !== "DETERMINISTIC"
+          ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} re-analysis persisted. Guardian evaluated it; no action executed automatically.`
           : "Deterministic fallback re-analysis persisted. No action executed automatically.",
     };
   }

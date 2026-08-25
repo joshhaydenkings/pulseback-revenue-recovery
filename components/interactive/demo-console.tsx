@@ -40,7 +40,7 @@ const aiScenarios = [
 ] as const;
 
 type AITestResult = {
-  provider: "OPENAI" | "DETERMINISTIC";
+  provider: "GROQ" | "OPENAI" | "DETERMINISTIC";
   model?: string;
   fallbackReason?: string;
   contextSummary: Record<string, string | number>;
@@ -53,7 +53,13 @@ type AITestResult = {
   guardian: { decision: string; reasons: string[] };
 };
 
-export function DemoConsole({ aiConfigured }: { aiConfigured: boolean }) {
+export function DemoConsole({
+  aiConfigured,
+  aiProvider,
+}: {
+  aiConfigured: boolean;
+  aiProvider: "GROQ" | "OPENAI";
+}) {
   const router = useRouter();
   const [running, setRunning] = useState("");
   const [useLiveAI, setUseLiveAI] = useState(false);
@@ -119,7 +125,7 @@ export function DemoConsole({ aiConfigured }: { aiConfigured: boolean }) {
               onChange={(event) => setUseLiveAI(event.target.checked)}
             />
             Use Live AI Analysis
-            <small>{aiConfigured ? "Explicit model calls enabled for scenarios" : "Configure OPENAI_API_KEY to enable"}</small>
+            <small>{aiConfigured ? "Explicit model calls enabled for scenarios" : `Configure ${aiProvider === "GROQ" ? "GROQ_API_KEY" : "OPENAI_API_KEY"} to enable`}</small>
           </label>
         </div>
         <button
@@ -181,7 +187,7 @@ export function DemoConsole({ aiConfigured }: { aiConfigured: boolean }) {
         {aiError && <div className="demo-result failure">{aiError}</div>}
         {aiResult && (
           <div className="ai-test-result">
-            <div><span>Provider</span><b>{aiResult.provider === "OPENAI" ? `OPENAI · ${aiResult.model}` : `RULES FALLBACK${aiResult.fallbackReason ? ` · ${aiResult.fallbackReason}` : ""}`}</b></div>
+            <div><span>Provider</span><b>{aiResult.provider !== "DETERMINISTIC" ? `${aiResult.provider} · ${aiResult.model}` : `RULES FALLBACK${aiResult.fallbackReason ? ` · ${aiResult.fallbackReason}` : ""}`}</b></div>
             <div><span>Context summary</span><b>{Object.entries(aiResult.contextSummary).map(([key, value]) => `${key}: ${value}`).join(" · ")}</b></div>
             <div><span>Diagnosis</span><b>{aiResult.decision.diagnosis}</b></div>
             <div><span>Recommendation</span><b>{aiResult.decision.recommendedAction.replaceAll("_", " ")}</b></div>

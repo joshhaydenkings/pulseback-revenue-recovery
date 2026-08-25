@@ -4,7 +4,7 @@
 
 - Node.js 22.13+
 - PostgreSQL 15+
-- Optional OpenAI API key for live AI recommendations
+- Optional Groq API key for live AI recommendations (OpenAI is also supported)
 - Optional Razorpay account in Test Mode and public HTTPS URL for webhooks
 
 ## 2. Install and configure
@@ -14,7 +14,7 @@ npm install
 Copy-Item .env.example .env.local
 ```
 
-For local PostgreSQL, set `DATABASE_URL`, `DIRECT_URL`, `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, and `DEMO_MODE=true`. Never prefix database or OpenAI secrets with `NEXT_PUBLIC_`.
+For local PostgreSQL, set `DATABASE_URL`, `DIRECT_URL`, `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, and `DEMO_MODE=true`. Never prefix database or AI-provider secrets with `NEXT_PUBLIC_`.
 
 For Neon/Cloudflare, use its pooled/serverless URL for `DATABASE_URL`, direct URL for `DIRECT_URL`, `DATABASE_DRIVER=neon`, and `DATABASE_RUNTIME=workerd`.
 
@@ -28,16 +28,17 @@ npm run db:seed
 
 For schema development use `npm run db:migrate -- --name your_migration_name`. `npm run db:reset` is destructive and is only suitable for an explicitly configured development database.
 
-## 4. Configure OpenAI (optional)
+## 4. Configure Groq (optional)
 
 Set these server-only variables in `.env.local`:
 
 ```text
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-5-mini
+AI_PROVIDER=groq
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-20b
 ```
 
-Restart the development server after editing `.env.local`. If the key is absent or a request fails, the application remains usable through the deterministic fallback and shows the fallback reason on the case and Integrations pages.
+Create the key in the Groq Console, keep it server-only, and restart the development server after editing `.env.local`. If the key is absent or a request fails, the application remains usable through the deterministic fallback and shows the fallback reason on the case and Integrations pages. To use OpenAI instead, set `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`.
 
 ## 5. Configure Razorpay Test Mode (optional)
 
@@ -75,7 +76,7 @@ Open `http://localhost:3000`. Use `npm run dev` only for the Worker-compatible d
 4. Open the case and compare **Provider Evidence**, **PulseBack AI Analysis**, and **Guardian Decision**.
 5. Use **Re-analyze with AI** to persist a new decision. Confirm no action executes until normal approval/execution rules are followed.
 
-The automated tests mock the API boundary and never use OpenAI credits.
+The automated tests mock the API boundary and never use provider credits.
 
 ## 8. Verification
 
@@ -91,7 +92,7 @@ npm audit --omit=dev
 
 ## 9. Fallback states
 
-- OpenAI unavailable: deterministic recommendation with `NOT_CONFIGURED`, `TIMEOUT`, `RATE_LIMIT`, `INVALID_RESPONSE`, or `API_ERROR`.
+- Hosted AI unavailable: deterministic recommendation with `NOT_CONFIGURED`, `TIMEOUT`, `RATE_LIMIT`, `INVALID_RESPONSE`, or `API_ERROR`.
 - Razorpay Test unavailable: mock payment provider.
 - Database unavailable and `DEMO_MODE=true`: in-memory repository; server restart resets that fallback state.
 

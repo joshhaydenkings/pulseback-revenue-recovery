@@ -213,10 +213,10 @@ export default async function RecoveryDetail({
               <div>
                 <span>PulseBack AI Analysis</span>
                 <em
-                  className={`decision-provider-badge ${c.decision.decisionProvider === "OPENAI" ? "openai" : "fallback"}`}
+                  className={`decision-provider-badge ${c.decision.decisionProvider !== "DETERMINISTIC" ? "openai" : "fallback"}`}
                 >
-                  {c.decision.decisionProvider === "OPENAI"
-                    ? "OPENAI"
+                  {c.decision.decisionProvider !== "DETERMINISTIC"
+                    ? c.decision.decisionProvider
                     : "RULES FALLBACK"}
                 </em>
               </div>
