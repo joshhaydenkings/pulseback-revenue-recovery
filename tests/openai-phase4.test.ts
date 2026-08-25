@@ -191,4 +191,108 @@ describe("Phase 4 OpenAI recovery intelligence", () => {
     expect(result.case.decision.decisionProvider).toBe("DETERMINISTIC");
     expect(result.case.decision.fallbackReason).toBe("NOT_CONFIGURED");
   });
+
+  it("does not invoke AI twice for a duplicate provider event", async () => {
+    const resolver = vi.fn().mockResolvedValue({
+      decision: {
+        ...validDecision,
+        supportingEvidence: [...validDecision.supportingEvidence],
+        riskFlags: [],
+        decisionProvider: "OPENAI",
+      },
+      provider: "OPENAI",
+      model: "test-model",
+    });
+    const repository = new MemoryRecoveryRepository(resolver);
+    const event = {
+      provider: "SIMULATOR" as const,
+      providerEventId: "phase4_duplicate_ai",
+      providerPaymentId: "pay_phase4_duplicate_ai",
+      type: "authentication_failure" as const,
+      amountPaise: 499_900,
+      useLiveAI: true,
+    };
+    await repository.processEvent(event);
+    const duplicate = await repository.processEvent(event);
+    expect(duplicate.duplicate).toBe(true);
+    expect(resolver).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["SHADOW", "PLAN_READY"],
+    ["APPROVAL", "AWAITING_APPROVAL"],
+    ["AUTOPILOT", "SCHEDULED"],
+  ] as const)(
+    "%s mode preserves Guardian execution semantics for AI decisions",
+    async (operatingMode, expectedStatus) => {
+      const resolver = vi.fn().mockResolvedValue({
+        decision: {
+          ...validDecision,
+          supportingEvidence: [...validDecision.supportingEvidence],
+          riskFlags: [],
+          decisionProvider: "OPENAI",
+        },
+        provider: "OPENAI",
+        model: "test-model",
+      });
+      const repository = new MemoryRecoveryRepository(resolver);
+      await repository.savePolicies({
+        ...(await repository.getPolicies()),
+        operatingMode,
+      });
+      const created = await repository.processEvent({
+        provider: "SIMULATOR",
+        providerEventId: `phase4_mode_${operatingMode}`,
+        type: "authentication_failure",
+        amountPaise: 499_900,
+        useLiveAI: true,
+      });
+      const recovery = await repository.getCase(created.caseId!);
+      expect(recovery?.status).toBe(expectedStatus);
+      expect(recovery?.attempts).toBe(0);
+      expect(recovery?.activePaymentLinkId).toBeUndefined();
+    },
+  );
+
+  it("blocks an AI recommendation at contact and attempt limits", async () => {
+    const recommendation: RecoveryDecision = {
+      ...validDecision,
+      supportingEvidence: [...validDecision.supportingEvidence],
+      riskFlags: [],
+      decisionProvider: "OPENAI",
+    };
+    const contactLimited = {
+      ...getDemoCase("RC-1039"),
+      attempts: 0,
+      memory: {
+        ...getDemoCase("RC-1039").memory,
+        contacts24h: DEFAULT_POLICIES.contactsPer24h,
+      },
+    };
+    const attemptLimited = {
+      ...getDemoCase("RC-1039"),
+      attempts: DEFAULT_POLICIES.maxAttemptsPerCase,
+    };
+    expect(
+      evaluateGuardian(contactLimited, recommendation, DEFAULT_POLICIES)
+        .decision,
+    ).toBe("BLOCKED");
+    expect(
+      evaluateGuardian(attemptLimited, recommendation, DEFAULT_POLICIES)
+        .decision,
+    ).toBe("BLOCKED");
+  });
+
+  it("keeps the deterministic Opportunity Score bounded", async () => {
+    const repository = new MemoryRecoveryRepository();
+    const created = await repository.processEvent({
+      provider: "TEST",
+      providerEventId: "phase4_bounded_score",
+      type: "repeated_failure",
+      amountPaise: 9_999_900,
+    });
+    const recovery = await repository.getCase(created.caseId!);
+    expect(recovery?.opportunityScore).toBeGreaterThanOrEqual(0);
+    expect(recovery?.opportunityScore).toBeLessThanOrEqual(100);
+  });
 });

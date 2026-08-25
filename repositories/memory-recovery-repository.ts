@@ -70,6 +70,10 @@ function cleanId(value: string) {
 
 export class MemoryRecoveryRepository implements RecoveryRepository {
   readonly kind = "demo-memory" as const;
+  constructor(
+    private readonly decisionResolver: typeof resolveRecoveryDecision =
+      resolveRecoveryDecision,
+  ) {}
   private cases = demoCases.map(cloneCase);
   private policies = { ...DEFAULT_POLICIES };
   private audits: AuditRecord[] = structuredClone(auditEvents);
@@ -418,7 +422,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       },
       policies: this.policies,
     });
-    const analysis = await resolveRecoveryDecision(context, {
+    const analysis = await this.decisionResolver(context, {
       useOpenAI: input.provider === "RAZORPAY" || input.useLiveAI === true,
     });
     const decision = {
@@ -590,7 +594,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       policies: this.policies,
       riskFlags: recovery.riskFlags,
     });
-    const analysis = await resolveRecoveryDecision(context, {
+    const analysis = await this.decisionResolver(context, {
       useOpenAI: true,
     });
     const decision = {
