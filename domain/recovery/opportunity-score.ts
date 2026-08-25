@@ -1,7 +1,7 @@
 import type { CustomerMemory, FailureCategory } from './types';
 
 export interface OpportunityInputs { amountPaise: number; predictedProbability: number; failureCategory: FailureCategory; memory: CustomerMemory; attempts: number; hoursSinceFailure: number; riskFlags: string[]; likelySelfResolve: boolean; hasActiveLink: boolean; }
-const categoryWeight: Record<FailureCategory, number> = { AUTHENTICATION:8, INSUFFICIENT_FUNDS:1, BANK_NETWORK:6, CUSTOMER_ABANDONMENT:4, SUBSCRIPTION_FAILURE:3, UNKNOWN:-4 };
+const categoryWeight: Record<FailureCategory, number> = { AUTHENTICATION:8, INSUFFICIENT_FUNDS:1, BANK_NETWORK:6, CUSTOMER_ABANDONMENT:4, SUBSCRIPTION_FAILURE:3, RISK_RELATED:-10, UNKNOWN:-4 };
 
 export function calculateOpportunityScore(input: OpportunityInputs) {
   const amountValue = Math.min(15, Math.log10(Math.max(input.amountPaise / 100, 100)) * 5);

@@ -190,6 +190,7 @@ export default async function RecoveryDetail({
                 <p>Evidence-backed diagnosis of the failed transaction.</p>
               </div>
             </div>
+            <div className="autopsy-section-label">Provider Evidence</div>
             <div className="autopsy-grid">
               <Data
                 label="Failure family"
@@ -208,9 +209,21 @@ export default async function RecoveryDetail({
                 warning={c.failureCategory === "BANK_NETWORK"}
               />
             </div>
-            <div className="explanation">
-              <BrainCircuit size={16} />
-              <p>{c.decision.merchantExplanation}</p>
+            <div className="analysis-block">
+              <div>
+                <span>PulseBack AI Analysis</span>
+                <em
+                  className={`decision-provider-badge ${c.decision.decisionProvider === "OPENAI" ? "openai" : "fallback"}`}
+                >
+                  {c.decision.decisionProvider === "OPENAI"
+                    ? "OPENAI"
+                    : "RULES FALLBACK"}
+                </em>
+              </div>
+              <div className="explanation">
+                <BrainCircuit size={16} />
+                <p>{c.decision.merchantExplanation}</p>
+              </div>
             </div>
           </section>
           <section className="panel detail-panel">
@@ -219,7 +232,7 @@ export default async function RecoveryDetail({
                 <BrainCircuit size={18} />
               </span>
               <div>
-                <h2>AI Recommendation</h2>
+                <h2>PulseBack AI Recommendation</h2>
                 <p>
                   Structured diagnosis. Recommendation only — not authorization.
                 </p>
@@ -234,6 +247,9 @@ export default async function RecoveryDetail({
               <div>
                 <span>MODEL CONFIDENCE</span>
                 <strong>{Math.round(c.decision.confidence * 100)}%</strong>
+                {c.decision.confidence < policies.minimumConfidence && (
+                  <small>Lower-confidence recommendation — merchant review advised.</small>
+                )}
               </div>
             </div>
             <ul className="evidence-list">
@@ -244,6 +260,22 @@ export default async function RecoveryDetail({
                 </li>
               ))}
             </ul>
+            <div className="decision-attributes">
+              <span>
+                Recoverability {Math.round(c.decision.estimatedRecoveryProbability * 100)}%
+              </span>
+              <span>Friction {c.decision.customerFriction ?? "MEDIUM"}</span>
+              <span>Urgency {c.decision.urgency ?? "MEDIUM"}</span>
+              {c.decision.model && <span>Model {c.decision.model}</span>}
+            </div>
+            {c.operatingMode === "SHADOW" && (
+              <div className="shadow-decision-note">
+                <b>Shadow Decision</b>
+                <span>
+                  PulseBack analyzed this payment but took no external action.
+                </span>
+              </div>
+            )}
           </section>
           <section className="panel detail-panel">
             <div className="detail-title">

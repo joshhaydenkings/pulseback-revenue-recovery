@@ -6,7 +6,10 @@ import type {
   TimelineEvent,
 } from "../domain/recovery/types";
 import { DEFAULT_POLICIES } from "../domain/recovery/types";
+import { evaluateGuardian } from "../domain/guardian/evaluate";
 import { auditEvents, demoCases } from "../lib/demo-data";
+import { resolveRecoveryDecision } from "../lib/ai/decision-engine";
+import { buildRecoveryDecisionContext } from "../lib/ai/recovery-decision-context";
 import {
   actionTypeFor,
   buildDeterministicDecision,
@@ -382,7 +385,51 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       fatigueScore: input.type === "exhausted_contact_limit" ? 95 : 18,
       preferredMethod: input.paymentMethod ?? "Card •••• 4408",
     };
-    const decision = buildDeterministicDecision(input.type, memory);
+    const baselineDecision = buildDeterministicDecision(input.type, memory);
+    const context = buildRecoveryDecisionContext({
+      transaction: {
+        amountPaise,
+        currency: "INR",
+        paymentMethod: input.paymentMethod ?? "Card",
+        failureCategory: baselineDecision.failureCategory,
+        failureReason:
+          input.failureDescription ??
+          failureDescriptionFor(baselineDecision.failureCategory),
+        errorSource:
+          String(input.providerMetadata?.errorSource ?? "") || undefined,
+        errorStep: String(input.providerMetadata?.errorStep ?? "") || undefined,
+        failedAt: input.occurredAt,
+      },
+      customer: {
+        internalCustomerId: `cust_sim_${suffix}`,
+        successfulPayments: memory.successfulPayments,
+        failedPayments: memory.failedPayments,
+        previousRecoveries: memory.previousRecoveries,
+        contacts24h: memory.contacts24h,
+        contacts7d: memory.contacts7d,
+        fatigueScore: memory.fatigueScore,
+        lastContactAt: memory.lastContactAt,
+        preferredMethod: memory.preferredMethod,
+      },
+      recovery: {
+        status: "ANALYZING",
+        attempts: memory.recoveryAttempts,
+        previousActions: [],
+      },
+      policies: this.policies,
+    });
+    const analysis = await resolveRecoveryDecision(context, {
+      useOpenAI: input.provider === "RAZORPAY" || input.useLiveAI === true,
+    });
+    const decision = {
+      ...analysis.decision,
+      riskFlags: [
+        ...new Set([
+          ...analysis.decision.riskFlags,
+          ...context.risk.knownRiskFlags,
+        ]),
+      ],
+    };
     const scored = scoreRecovery(amountPaise, decision, memory);
     const guardian = guardianFor(amountPaise, memory, decision, this.policies);
     const actionType = actionTypeFor(decision);
@@ -450,9 +497,15 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     this.timeline(
       recovery,
       "PULSEBACK_AI",
-      "Deterministic Payment Autopsy completed",
+      analysis.provider === "OPENAI"
+        ? "OpenAI Payment Autopsy completed"
+        : analysis.fallbackReason
+          ? "OpenAI fallback used"
+          : "Deterministic Payment Autopsy completed",
       "ai",
-      decision.merchantExplanation,
+      analysis.fallbackReason
+        ? "OpenAI decision unavailable. Deterministic recovery engine used."
+        : decision.merchantExplanation,
     );
     this.timeline(
       recovery,
@@ -495,6 +548,139 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       caseId: id,
       message:
         "Event persisted and processed through diagnosis, Guardian, action scheduling and audit.",
+    };
+  }
+
+  async reanalyzeCase(caseId: string): Promise<CaseCommandResult> {
+    const recovery = this.cases.find((item) => item.id === caseId);
+    if (!recovery) throw new Error("Recovery case not found");
+    if (["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(recovery.status))
+      throw new Error("Completed or stopped cases cannot be re-analyzed");
+    const actions = this.actions.filter((action) => action.caseId === caseId);
+    const context = buildRecoveryDecisionContext({
+      transaction: {
+        amountPaise: recovery.amountPaise,
+        currency: recovery.currency,
+        paymentMethod: recovery.paymentMethod,
+        failureCategory: recovery.failureCategory,
+        failureReason: recovery.failureDescription,
+        failedAt: recovery.createdAt,
+      },
+      customer: {
+        internalCustomerId: recovery.customerId,
+        successfulPayments: recovery.memory.successfulPayments,
+        failedPayments: recovery.memory.failedPayments,
+        previousRecoveries: recovery.memory.previousRecoveries,
+        contacts24h: recovery.memory.contacts24h,
+        contacts7d: recovery.memory.contacts7d,
+        fatigueScore: recovery.memory.fatigueScore,
+        lastContactAt: recovery.memory.lastContactAt,
+        preferredMethod: recovery.memory.preferredMethod,
+      },
+      recovery: {
+        status: recovery.status,
+        attempts: recovery.attempts,
+        previousActions: actions.map((action) => ({
+          type: action.type,
+          status: action.status,
+        })),
+        activePaymentLinkId: recovery.activePaymentLinkId,
+        nextActionAt: recovery.nextActionAt,
+      },
+      policies: this.policies,
+      riskFlags: recovery.riskFlags,
+    });
+    const analysis = await resolveRecoveryDecision(context, {
+      useOpenAI: true,
+    });
+    const decision = {
+      ...analysis.decision,
+      riskFlags: [
+        ...new Set([
+          ...analysis.decision.riskFlags,
+          ...context.risk.knownRiskFlags,
+        ]),
+      ],
+    };
+    const guardian = evaluateGuardian(
+      { ...recovery, riskFlags: decision.riskFlags },
+      decision,
+      this.policies,
+    );
+    const scored = scoreRecovery(recovery.amountPaise, decision, recovery.memory);
+    actions
+      .filter((action) =>
+        ["PENDING", "SCHEDULED", "APPROVED"].includes(action.status),
+      )
+      .forEach((action) => {
+        action.status = "CANCELLED";
+      });
+    recovery.decision = decision;
+    recovery.failureCategory = decision.failureCategory;
+    recovery.riskFlags = decision.riskFlags;
+    recovery.predictedRecoveryProbability =
+      decision.estimatedRecoveryProbability;
+    recovery.opportunityScore = scored.score;
+    recovery.expectedRecoverableValuePaise =
+      scored.expectedRecoverableValuePaise;
+    recovery.currentStrategy = actionTypeFor(decision);
+    recovery.guardianDecision = guardian.decision;
+    recovery.guardianReasons = guardian.reasons;
+    recovery.nextActionAt = undefined;
+    recovery.status =
+      guardian.decision === "BLOCKED" || decision.recommendedAction === "STOP"
+        ? "STOPPED"
+        : this.policies.operatingMode === "SHADOW"
+          ? "PLAN_READY"
+          : "AWAITING_APPROVAL";
+    if (!recovery.activePaymentLinkId && recovery.status !== "STOPPED")
+      this.actions.push({
+        id: `action_reanalysis_${crypto.randomUUID()}`,
+        caseId,
+        type: recovery.currentStrategy,
+        status: "PENDING",
+      });
+    this.timeline(
+      recovery,
+      "MERCHANT",
+      "Recovery re-analysis requested",
+      "neutral",
+      "Current context was analyzed again; no financial action executed automatically.",
+    );
+    this.timeline(
+      recovery,
+      "PULSEBACK_AI",
+      analysis.provider === "OPENAI"
+        ? "OpenAI re-analysis completed"
+        : "Rules fallback re-analysis completed",
+      "ai",
+      decision.merchantExplanation,
+    );
+    this.timeline(
+      recovery,
+      "GUARDIAN",
+      `Guardian ${guardian.decision.toLowerCase()}`,
+      guardian.decision === "APPROVED" ? "success" : "warning",
+      guardian.reasons.join(" · "),
+    );
+    this.audit(
+      caseId,
+      "DECISION",
+      "RECOVERY_REANALYSIS_COMPLETED",
+      "PULSEBACK_AI",
+      "Re-analysis and deterministic Guardian evaluation completed.",
+      {
+        decisionProvider: analysis.provider,
+        fallbackReason: analysis.fallbackReason,
+      },
+    );
+    return {
+      ok: true,
+      case: recovery,
+      message:
+        analysis.provider === "OPENAI"
+          ? "OpenAI re-analysis persisted. Guardian evaluated it; no action executed automatically."
+          : "Deterministic fallback re-analysis persisted. No action executed automatically.",
     };
   }
 

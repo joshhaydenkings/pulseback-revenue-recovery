@@ -7,8 +7,11 @@ import type {
   TimelineEvent,
 } from "../domain/recovery/types";
 import { DEFAULT_POLICIES } from "../domain/recovery/types";
+import { evaluateGuardian } from "../domain/guardian/evaluate";
 import { getPrisma } from "../lib/db/prisma";
 import { formatInrPaise } from "../lib/money";
+import { resolveRecoveryDecision } from "../lib/ai/decision-engine";
+import { buildRecoveryDecisionContext } from "../lib/ai/recovery-decision-context";
 import {
   resolvePaymentProvider,
   RazorpayProviderError,
@@ -121,6 +124,17 @@ function toDomain(record: CaseRecord): RecoveryCase {
         merchantExplanation: latest.merchantExplanation,
         supportingEvidence: jsonStrings(latest.supportingEvidence),
         riskFlags: jsonStrings(latest.riskFlags),
+        suggestedWaitMinutes: latest.suggestedWaitMinutes,
+        waitMinutes: latest.suggestedWaitMinutes ?? undefined,
+        customerFriction:
+          latest.customerFriction as RecoveryCase["decision"]["customerFriction"],
+        urgency: latest.urgency as RecoveryCase["decision"]["urgency"],
+        decisionProvider:
+          latest.decisionProvider as RecoveryCase["decision"]["decisionProvider"],
+        model: latest.model ?? undefined,
+        fallbackReason:
+          latest.fallbackReason as RecoveryCase["decision"]["fallbackReason"],
+        createdAt: latest.createdAt.toISOString(),
       }
     : fallback;
   return {
@@ -709,23 +723,95 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           : null;
         const customerId = providerOrder?.customerId ?? `cust_sim_${suffix}`;
         const paymentId = `payment_${input.provider.toLowerCase()}_${suffix}`;
+        const customerHistory = providerOrder?.customerId
+          ? await tx.customer.findUnique({ where: { id: providerOrder.customerId } })
+          : null;
+        const storedHistory = customerHistory
+          ? await Promise.all([
+              tx.recoveryAction.count({
+                where: {
+                  recoveryCase: { customerId: customerHistory.id },
+                  executedAt: { gte: new Date(Date.now() - 24 * 60 * 60_000) },
+                },
+              }),
+              tx.recoveryAction.count({
+                where: {
+                  recoveryCase: { customerId: customerHistory.id },
+                  executedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60_000) },
+                },
+              }),
+              tx.recoveryCase.count({
+                where: { customerId: customerHistory.id, status: "RECOVERED" },
+              }),
+            ])
+          : [0, 1, 1];
         const memory: CustomerMemory = {
-          successfulPayments: 4,
-          failedPayments: 1,
+          successfulPayments: customerHistory?.totalSuccessfulPayments ?? 4,
+          failedPayments: customerHistory?.totalFailedPayments ?? 1,
           recoveryAttempts: input.type === "repeated_failure" ? 2 : 0,
           contacts24h:
             input.type === "exhausted_contact_limit"
               ? policies.contactsPer24h
-              : 0,
+              : storedHistory[0],
           contacts7d:
             input.type === "exhausted_contact_limit"
               ? policies.contactsPer7d
-              : 1,
-          previousRecoveries: 1,
-          fatigueScore: input.type === "exhausted_contact_limit" ? 95 : 18,
+              : storedHistory[1],
+          previousRecoveries: storedHistory[2],
+          fatigueScore:
+            input.type === "exhausted_contact_limit"
+              ? 95
+              : customerHistory?.recoveryFatigueScore ?? 18,
           preferredMethod: input.paymentMethod ?? "Card •••• 4408",
+          lastContactAt: customerHistory?.lastContactAt?.toISOString(),
         };
-        const decision = buildDeterministicDecision(input.type, memory);
+        const baselineDecision = buildDeterministicDecision(input.type, memory);
+        const useOpenAI =
+          input.provider === "RAZORPAY" || input.useLiveAI === true;
+        const context = buildRecoveryDecisionContext({
+          transaction: {
+            amountPaise,
+            currency: "INR",
+            paymentMethod: input.paymentMethod ?? "Card",
+            failureCategory: baselineDecision.failureCategory,
+            failureReason:
+              input.failureDescription ??
+              failureDescriptionFor(baselineDecision.failureCategory),
+            errorSource:
+              String(input.providerMetadata?.errorSource ?? "") || undefined,
+            errorStep:
+              String(input.providerMetadata?.errorStep ?? "") || undefined,
+            failedAt: input.occurredAt,
+          },
+          customer: {
+            internalCustomerId: customerId,
+            successfulPayments: memory.successfulPayments,
+            failedPayments: memory.failedPayments,
+            previousRecoveries: memory.previousRecoveries,
+            contacts24h: memory.contacts24h,
+            contacts7d: memory.contacts7d,
+            fatigueScore: memory.fatigueScore,
+            lastContactAt: memory.lastContactAt,
+            preferredMethod: memory.preferredMethod,
+          },
+          recovery: {
+            status: "ANALYZING",
+            attempts: memory.recoveryAttempts,
+            previousActions: [],
+          },
+          policies,
+          riskFlags: [],
+        });
+        const analysis = await resolveRecoveryDecision(context, { useOpenAI });
+        const decision = {
+          ...analysis.decision,
+          riskFlags: [
+            ...new Set([
+              ...analysis.decision.riskFlags,
+              ...context.risk.knownRiskFlags,
+            ]),
+          ],
+        };
         const scored = scoreRecovery(amountPaise, decision, memory);
         const guardian = guardianFor(amountPaise, memory, decision, policies);
         const actionType = actionTypeFor(decision);
@@ -809,7 +895,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
             opportunityScore: scored.score,
             predictedRecoveryProbability: decision.estimatedRecoveryProbability,
             expectedRecoverableValue: scored.expectedRecoverableValuePaise,
-            diagnosis: input.failureDescription ?? decision.diagnosis,
+            diagnosis: decision.diagnosis,
             currentStrategy: actionType,
             attempts: memory.recoveryAttempts,
             recoveryStartedAt: new Date(),
@@ -817,6 +903,8 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
             decisions: {
               create: {
                 id: crypto.randomUUID(),
+                failureCategory: decision.failureCategory,
+                diagnosis: decision.diagnosis,
                 recommendedAction: decision.recommendedAction,
                 confidence: decision.confidence,
                 estimatedRecoveryProbability:
@@ -824,6 +912,13 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
                 merchantExplanation: decision.merchantExplanation,
                 supportingEvidence: decision.supportingEvidence,
                 riskFlags: decision.riskFlags,
+                suggestedWaitMinutes:
+                  decision.suggestedWaitMinutes ?? decision.waitMinutes,
+                customerFriction: decision.customerFriction ?? "MEDIUM",
+                urgency: decision.urgency ?? "MEDIUM",
+                decisionProvider: analysis.provider,
+                model: analysis.model,
+                fallbackReason: analysis.fallbackReason,
                 guardianDecision: guardian.decision,
                 guardianReasons: guardian.reasons,
               },
@@ -877,14 +972,33 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           `${caseId} entered the persistent recovery pipeline.`,
           { paymentId },
         );
+        if (useOpenAI)
+          await this.createAudit(
+            tx,
+            caseId,
+            "DECISION",
+            "OPENAI_ANALYSIS_REQUESTED",
+            "PULSEBACK_AI",
+            "OpenAI recovery analysis was requested using a minimal, structured context.",
+            { model: analysis.model },
+          );
         await this.createAudit(
           tx,
           caseId,
           "DECISION",
-          "DETERMINISTIC_AUTOPSY_COMPLETED",
+          analysis.provider === "OPENAI"
+            ? "OPENAI_RECOMMENDATION_CREATED"
+            : analysis.fallbackReason
+              ? "OPENAI_FALLBACK_USED"
+              : "DETERMINISTIC_AUTOPSY_COMPLETED",
           "PULSEBACK_AI",
-          decision.merchantExplanation,
+          analysis.fallbackReason
+            ? "OpenAI decision unavailable. Deterministic recovery engine used."
+            : decision.merchantExplanation,
           {
+            decisionProvider: analysis.provider,
+            model: analysis.model,
+            fallbackReason: analysis.fallbackReason,
             recommendedAction: decision.recommendedAction,
             confidence: decision.confidence,
           },
@@ -895,8 +1009,8 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           "GUARDIAN",
           `GUARDIAN_${guardian.decision}`,
           "GUARDIAN",
-          guardian.reasons.join(" · "),
-          { policies } as unknown as Prisma.InputJsonValue,
+          `${guardian.decision === "APPROVED" ? "Guardian approved" : guardian.decision === "BLOCKED" ? "Guardian blocked" : "Guardian requires approval for"} ${analysis.provider === "OPENAI" ? "OpenAI" : "deterministic"} recommendation. ${guardian.reasons.join(" · ")}`,
+          { policies, decisionProvider: analysis.provider } as unknown as Prisma.InputJsonValue,
         );
         await markProcessed();
         return {
@@ -907,7 +1021,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           message:
             "Event committed through payment, case, decision, Guardian, action and audit.",
         };
-      });
+      }, { maxWait: 5_000, timeout: 12_000 });
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -933,6 +1047,218 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       }
       throw error;
     }
+  }
+
+  async reanalyzeCase(caseId: string): Promise<CaseCommandResult> {
+    const prisma = await getPrisma();
+    const recovery = await prisma.recoveryCase.findUnique({
+      where: { id: caseId },
+      include: caseInclude,
+    });
+    if (!recovery) throw new Error("Recovery case not found");
+    if (["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(recovery.status))
+      throw new Error("Completed or stopped cases cannot be re-analyzed");
+
+    const policies = await this.getPolicies();
+    const domain = toDomain(recovery);
+    const now = new Date();
+    const [contacts24h, contacts7d, previousRecoveries] = await Promise.all([
+      prisma.recoveryAction.count({
+        where: {
+          recoveryCase: { customerId: recovery.customerId },
+          executedAt: { gte: new Date(now.getTime() - 24 * 60 * 60 * 1_000) },
+        },
+      }),
+      prisma.recoveryAction.count({
+        where: {
+          recoveryCase: { customerId: recovery.customerId },
+          executedAt: { gte: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1_000) },
+        },
+      }),
+      prisma.recoveryCase.count({
+        where: {
+          customerId: recovery.customerId,
+          status: { in: ["RECOVERED", "SELF_RECOVERED"] },
+        },
+      }),
+    ]);
+    const currentMemory = {
+      ...domain.memory,
+      contacts24h,
+      contacts7d,
+      previousRecoveries,
+    };
+    const context = buildRecoveryDecisionContext({
+      transaction: {
+        amountPaise: domain.amountPaise,
+        currency: domain.currency,
+        paymentMethod: domain.paymentMethod,
+        failureCategory: domain.failureCategory,
+        failureReason: domain.failureDescription,
+        errorSource: recovery.payment.failureSource ?? undefined,
+        errorStep: recovery.payment.failureStep ?? undefined,
+        failedAt: recovery.payment.createdAt,
+      },
+      customer: {
+        internalCustomerId: domain.customerId,
+        successfulPayments: domain.memory.successfulPayments,
+        failedPayments: domain.memory.failedPayments,
+        previousRecoveries: currentMemory.previousRecoveries,
+        contacts24h: currentMemory.contacts24h,
+        contacts7d: currentMemory.contacts7d,
+        fatigueScore: domain.memory.fatigueScore,
+        lastContactAt: domain.memory.lastContactAt,
+        preferredMethod: domain.memory.preferredMethod,
+      },
+      recovery: {
+        status: domain.status,
+        attempts: domain.attempts,
+        previousActions: recovery.actions.map((action) => ({
+          type: action.type,
+          status: action.status,
+        })),
+        activePaymentLinkId: domain.activePaymentLinkId,
+        nextActionAt: domain.nextActionAt,
+      },
+      policies,
+      riskFlags: domain.riskFlags,
+    });
+    const analysis = await resolveRecoveryDecision(context, {
+      useOpenAI: true,
+    });
+    const decision = {
+      ...analysis.decision,
+      riskFlags: [
+        ...new Set([
+          ...analysis.decision.riskFlags,
+          ...context.risk.knownRiskFlags,
+        ]),
+      ],
+    };
+    const guardian = evaluateGuardian(
+      { ...domain, memory: currentMemory, riskFlags: decision.riskFlags },
+      decision,
+      policies,
+    );
+    const scored = scoreRecovery(domain.amountPaise, decision, currentMemory);
+    const actionType = actionTypeFor(decision);
+    const status =
+      guardian.decision === "BLOCKED" || decision.recommendedAction === "STOP"
+        ? "STOPPED"
+        : policies.operatingMode === "SHADOW"
+          ? "PLAN_READY"
+          : "AWAITING_APPROVAL";
+
+    await prisma.$transaction(async (tx) => {
+      await tx.recoveryAction.updateMany({
+        where: {
+          recoveryCaseId: caseId,
+          status: { in: ["PENDING", "SCHEDULED", "APPROVED"] },
+        },
+        data: {
+          status: "CANCELLED",
+          errorMessage: "Superseded by merchant-requested re-analysis.",
+        },
+      });
+      await tx.recoveryCase.update({
+        where: { id: caseId },
+        data: {
+          status,
+          failureCategory: decision.failureCategory,
+          diagnosis: decision.diagnosis,
+          currentStrategy: actionType,
+          predictedRecoveryProbability: decision.estimatedRecoveryProbability,
+          opportunityScore: scored.score,
+          expectedRecoverableValue: scored.expectedRecoverableValuePaise,
+          nextActionAt: null,
+        },
+      });
+      await tx.recoveryDecision.create({
+        data: {
+          id: crypto.randomUUID(),
+          recoveryCaseId: caseId,
+          failureCategory: decision.failureCategory,
+          diagnosis: decision.diagnosis,
+          recommendedAction: decision.recommendedAction,
+          confidence: decision.confidence,
+          estimatedRecoveryProbability: decision.estimatedRecoveryProbability,
+          merchantExplanation: decision.merchantExplanation,
+          supportingEvidence: decision.supportingEvidence,
+          riskFlags: decision.riskFlags,
+          suggestedWaitMinutes:
+            decision.suggestedWaitMinutes ?? decision.waitMinutes,
+          customerFriction: decision.customerFriction ?? "MEDIUM",
+          urgency: decision.urgency ?? "MEDIUM",
+          decisionProvider: analysis.provider,
+          model: analysis.model,
+          fallbackReason: analysis.fallbackReason,
+          guardianDecision: guardian.decision,
+          guardianReasons: guardian.reasons,
+        },
+      });
+      if (!domain.activePaymentLinkId && status !== "STOPPED")
+        await tx.recoveryAction.create({
+          data: {
+            id: crypto.randomUUID(),
+            recoveryCaseId: caseId,
+            type: actionType,
+            status: "PENDING",
+            metadata: {
+              source: "REANALYSIS",
+              requiresMerchantApproval: true,
+              decisionProvider: analysis.provider,
+            },
+          },
+        });
+      await this.createAudit(
+        tx,
+        caseId,
+        "DECISION",
+        "RECOVERY_REANALYSIS_REQUESTED",
+        "MERCHANT",
+        "Merchant requested a fresh recovery analysis using current case context.",
+        { model: analysis.model },
+      );
+      await this.createAudit(
+        tx,
+        caseId,
+        "DECISION",
+        analysis.provider === "OPENAI"
+          ? "OPENAI_REANALYSIS_COMPLETED"
+          : "REANALYSIS_FALLBACK_USED",
+        "PULSEBACK_AI",
+        analysis.fallbackReason
+          ? "OpenAI decision unavailable. Deterministic recovery engine used."
+          : decision.merchantExplanation,
+        {
+          decisionProvider: analysis.provider,
+          model: analysis.model,
+          fallbackReason: analysis.fallbackReason,
+          recommendedAction: decision.recommendedAction,
+          confidence: decision.confidence,
+        },
+      );
+      await this.createAudit(
+        tx,
+        caseId,
+        "GUARDIAN",
+        `GUARDIAN_REANALYSIS_${guardian.decision}`,
+        "GUARDIAN",
+        `Guardian independently evaluated the new recommendation: ${guardian.decision}.`,
+        { reasons: guardian.reasons },
+      );
+    });
+
+    const updated = await this.getCase(caseId);
+    if (!updated) throw new Error("Recovery case disappeared after re-analysis");
+    return {
+      ok: true,
+      case: updated,
+      message:
+        analysis.provider === "OPENAI"
+          ? "OpenAI re-analysis persisted. Guardian evaluated it; no action executed automatically."
+          : "Deterministic fallback re-analysis persisted. No action executed automatically.",
+    };
   }
 
   async runCaseCommand(

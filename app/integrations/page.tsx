@@ -11,9 +11,13 @@ import {
 import { AppShell } from "../../components/app-shell";
 import { PageHeader } from "../../components/page-header";
 import { getRazorpayIntegrationStatus } from "../../services/razorpay-integration-service";
+import { getAIIntegrationStatus } from "../../services/ai-integration-service";
 
 export default async function Integrations() {
-  const razor = await getRazorpayIntegrationStatus();
+  const [razor, ai] = await Promise.all([
+    getRazorpayIntegrationStatus(),
+    getAIIntegrationStatus(),
+  ]);
   const connected = razor.status === "connected";
   return (
     <AppShell active="Integrations">
@@ -72,15 +76,35 @@ export default async function Integrations() {
         <Integration
           name="OpenAI"
           icon={<Bot />}
-          connected={false}
-          badge="PHASE 4"
-          description="OpenAI remains intentionally disconnected in Phase 3."
+          connected={ai.status !== "not-configured"}
+          badge={
+            ai.status === "connected"
+              ? "CONNECTED"
+              : ai.status === "degraded"
+                ? "DEGRADED"
+                : "FALLBACK MODE"
+          }
+          description={
+            ai.status === "not-configured"
+              ? "Deterministic Recovery Engine — zero-config fallback active"
+              : "OpenAI structured recovery intelligence — Guardian remains authoritative"
+          }
           rows={[
-            ["Decision engine", "Deterministic rules"],
-            ["External model calls", "Disabled"],
-            ["Guardian", "Active and server-driven"],
+            ["AI Provider", ai.provider],
+            ["Status", ai.status === "not-configured" ? "Fallback Mode" : ai.status === "degraded" ? "Degraded" : "Connected"],
+            ["Model", ai.model ?? "Not configured"],
+            ["Fallback", "Enabled"],
+            ["Recent AI decisions", String(ai.recentAIDecisions)],
+            ["Fallback decisions", String(ai.fallbackDecisions)],
+            [
+              "Last successful AI decision",
+              ai.lastSuccessfulAIDecision
+                ? new Date(ai.lastSuccessfulAIDecision).toLocaleString("en-IN")
+                : "—",
+            ],
+            ["Guardian", "Active and deterministic"],
           ]}
-          env={[]}
+          env={["OPENAI_API_KEY", "OPENAI_MODEL"]}
         />
         <Integration
           name="Notifications"
@@ -109,7 +133,7 @@ export default async function Integrations() {
         <div>
           <span>
             <Bot size={14} />
-            Rules recommend
+            AI recommends
           </span>
           <i>→</i>
           <span>

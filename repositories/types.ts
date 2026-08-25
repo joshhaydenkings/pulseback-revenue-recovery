@@ -36,6 +36,7 @@ export interface RecoveryEventInput {
   occurredAt?: string;
   payload?: Record<string, unknown>;
   injectProviderFailure?: boolean;
+  useLiveAI?: boolean;
 }
 
 export interface RecoveryEventResult {
@@ -117,6 +118,7 @@ export interface RecoveryRepository {
     command: CaseCommand,
     reason?: string,
   ): Promise<CaseCommandResult>;
+  reanalyzeCase(caseId: string): Promise<CaseCommandResult>;
   processDueActions(now?: Date): Promise<DueActionResult>;
   getDashboard(): Promise<DashboardSnapshot>;
   saveEvaluation(result: EvaluationResult): Promise<EvaluationRunSummary>;

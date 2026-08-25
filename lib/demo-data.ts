@@ -13,7 +13,7 @@ const definitions: Array<[string,string,number,FailureCategory,RecoveryStatus,nu
   ['RC-1012','Dev Malhotra',9999,'AUTHENTICATION','RECOVERED',84,.76,'CREATE_PAYMENT_LINK','Card •••• 9032'],
 ];
 
-const descriptions:Record<FailureCategory,string>={AUTHENTICATION:'Payment authentication was not completed by the issuing bank',INSUFFICIENT_FUNDS:'Issuer declined because the account balance was insufficient',BANK_NETWORK:'Bank gateway timed out before returning a final status',CUSTOMER_ABANDONMENT:'Customer left checkout before authorization completed',SUBSCRIPTION_FAILURE:'Recurring mandate could not be charged',UNKNOWN:'Provider returned an unclassified failure'};
+const descriptions:Record<FailureCategory,string>={AUTHENTICATION:'Payment authentication was not completed by the issuing bank',INSUFFICIENT_FUNDS:'Issuer declined because the account balance was insufficient',BANK_NETWORK:'Bank gateway timed out before returning a final status',CUSTOMER_ABANDONMENT:'Customer left checkout before authorization completed',SUBSCRIPTION_FAILURE:'Recurring mandate could not be charged',RISK_RELATED:'Provider evidence indicates a risk-related payment failure',UNKNOWN:'Provider returned an unclassified failure'};
 const actions:Record<string,RecoveryCase['decision']['recommendedAction']>={REQUEST_MERCHANT_APPROVAL:'CREATE_PAYMENT_LINK',CREATE_PAYMENT_LINK:'CREATE_PAYMENT_LINK',OBSERVE:'OBSERVE',WAIT:'WAIT',SEND_EMAIL_REMINDER:'SEND_REMINDER',ESCALATE:'ESCALATE',STOP:'STOP'};
 
 export const demoCases: RecoveryCase[] = definitions.map(([id,name,amount,category,status,score,prob,strategy,method],index)=>{

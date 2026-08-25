@@ -12,7 +12,7 @@ const methods=['UPI','Card','Netbanking','Wallet'];
 
 export function generateSyntheticCases(seed:string,count:number):SyntheticCase[]{const random=mulberry32(hashSeed(seed));return Array.from({length:count},(_,i)=>{const category=categories[Math.floor(random()*categories.length)];const amount=amounts[Math.floor(Math.pow(random(),1.35)*amounts.length)];return{id:`SYN-${String(i+1).padStart(4,'0')}`,amountPaise:amount*100,category,method:methods[Math.floor(random()*methods.length)],successfulPayments:Math.floor(random()*8),attempts:Math.floor(random()*3),fatigue:Math.floor(random()*100),risk:random()<.055,selfResolve:category==='BANK_NETWORK'&&random()<.22,outcomeDraw:random()};});}
 
-const baseProb:Record<FailureCategory,number>={AUTHENTICATION:.42,INSUFFICIENT_FUNDS:.26,BANK_NETWORK:.36,CUSTOMER_ABANDONMENT:.29,SUBSCRIPTION_FAILURE:.31,UNKNOWN:.12};
+const baseProb:Record<FailureCategory,number>={AUTHENTICATION:.42,INSUFFICIENT_FUNDS:.26,BANK_NETWORK:.36,CUSTOMER_ABANDONMENT:.29,SUBSCRIPTION_FAILURE:.31,RISK_RELATED:.08,UNKNOWN:.12};
 export function runEvaluation(seed='PULSEBACK-2026',caseCount=200):EvaluationResult{
   const cases=generateSyntheticCases(seed,caseCount);let baselineRecovered=0,pulseRecovered=0,baselineCount=0,pulseCount=0,baselineActions=0,pulseActions=0,baselineContacts=0,pulseContacts=0,autonomous=0,escalations=0,stopped=0,selfRecovered=0,baselineTime=0,pulseTime=0;
   const byCategory=new Map<string,{baseline:number;pulseBack:number}>();const strategyValues=new Map<string,number>([['Payment Link',0],['Wait + Reminder',0],['Observe',0],['Smart Retry',0]]);

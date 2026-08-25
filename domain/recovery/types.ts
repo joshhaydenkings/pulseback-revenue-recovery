@@ -20,6 +20,7 @@ export type FailureCategory =
   | "BANK_NETWORK"
   | "CUSTOMER_ABANDONMENT"
   | "SUBSCRIPTION_FAILURE"
+  | "RISK_RELATED"
   | "UNKNOWN";
 export type RecoveryActionType =
   | "OBSERVE"
@@ -62,7 +63,19 @@ export interface RecoveryDecision {
   merchantExplanation: string;
   supportingEvidence: string[];
   waitMinutes?: number;
+  suggestedWaitMinutes?: number | null;
   riskFlags: string[];
+  customerFriction?: "LOW" | "MEDIUM" | "HIGH";
+  urgency?: "LOW" | "MEDIUM" | "HIGH";
+  decisionProvider?: "OPENAI" | "DETERMINISTIC";
+  model?: string;
+  fallbackReason?:
+    | "NOT_CONFIGURED"
+    | "TIMEOUT"
+    | "RATE_LIMIT"
+    | "INVALID_RESPONSE"
+    | "API_ERROR";
+  createdAt?: string;
 }
 
 export interface RecoveryCase {

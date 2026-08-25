@@ -24,6 +24,7 @@ const descriptions: Record<FailureCategory, string> = {
   BANK_NETWORK: 'Bank gateway timed out before returning a final status',
   CUSTOMER_ABANDONMENT: 'Customer left checkout before authorization completed',
   SUBSCRIPTION_FAILURE: 'Recurring mandate could not be charged',
+  RISK_RELATED: 'Provider evidence indicates a risk-related payment failure',
   UNKNOWN: 'Provider returned an unclassified payment update',
 };
 
@@ -64,7 +65,11 @@ export function buildDeterministicDecision(type: SimulatorEventType, memory: Cus
       `Attempt ${memory.recoveryAttempts + 1}`,
     ],
     waitMinutes: recommendedAction === 'OBSERVE' ? 12 : recommendedAction === 'WAIT' ? 120 : undefined,
+    suggestedWaitMinutes: recommendedAction === 'OBSERVE' ? 12 : recommendedAction === 'WAIT' ? 120 : null,
     riskFlags: [],
+    customerFriction: recommendedAction === 'STOP' || recommendedAction === 'WAIT' || recommendedAction === 'OBSERVE' ? 'LOW' : 'MEDIUM',
+    urgency: recommendedAction === 'STOP' ? 'HIGH' : failureCategory === 'BANK_NETWORK' || failureCategory === 'INSUFFICIENT_FUNDS' ? 'LOW' : 'MEDIUM',
+    decisionProvider: 'DETERMINISTIC',
   };
 }
 

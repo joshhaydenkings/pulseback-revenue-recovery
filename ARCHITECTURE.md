@@ -1,76 +1,54 @@
 # PulseBack architecture
 
-## Boundaries
+## Trust and authority boundaries
 
-1. Razorpay secrets exist only in server configuration and the provider adapter.
-2. Checkout receives only the public Test key. PulseBack never handles card data.
-3. Raw webhook bytes are authenticated before JSON parsing or mutation.
-4. Razorpay and simulator payloads normalize into one `RecoveryEventInput` contract.
-5. PostgreSQL idempotency is claimed in the same transaction as recovery state changes.
-6. Deterministic Guardian policy—not an LLM—authorizes actions in Phase 3.
-7. Provider execution is claimed atomically before the external API call; an active stored link is reused.
+1. Razorpay and OpenAI secrets exist only in server configuration and adapters.
+2. Raw Razorpay webhook bytes are authenticated before parsing or mutation.
+3. Razorpay and simulator events normalize into one `RecoveryEventInput` pipeline.
+4. AI receives a small `RecoveryDecisionContext`, not raw database rows or webhook payloads.
+5. Provider strings are untrusted, length-limited, identifier-redacted data. Instruction-like text is omitted and flagged.
+6. OpenAI produces a strict `RecoveryDecision`; it does not execute actions or control funds.
+7. Deterministic Guardian evaluates every recommendation after AI and before execution.
+8. PostgreSQL idempotency and transactional state changes remain authoritative.
 
-## Request flow
+## Decision flow
 
 ```mermaid
-sequenceDiagram
-  participant U as Test customer
-  participant C as PulseBack Checkout
-  participant R as Razorpay Test API
-  participant W as Signed webhook route
-  participant P as Recovery service
-  participant DB as PostgreSQL
-
-  U->>C: Start Test Checkout
-  C->>R: Server creates Test Order
-  C->>DB: Persist ProviderOrder + audit
-  R-->>C: Standard Checkout result
-  C->>C: Server verifies Checkout signature
-  R->>W: payment.failed + HMAC signature
-  W->>W: Verify raw body, normalize event
-  W->>P: Shared RecoveryEventInput
-  P->>DB: Atomic event/payment/case/decision/action/audit
-  P->>R: Create Test Payment Link after Guardian approval
-  P->>DB: Persist link ID, URL, status, expiry, reference
-  U->>R: Pay Test Payment Link
-  R->>W: payment_link.paid + HMAC signature
-  W->>P: Same pipeline
-  P->>DB: Validate link + reference + amount; recover exactly once
+flowchart LR
+  E[Signed Razorpay or Demo event] --> N[Normalize and claim idempotency]
+  N --> C[Build minimal safe decision context]
+  C --> O{OpenAI configured?}
+  O -->|Yes| R[Responses API structured decision]
+  O -->|No or failure| F[Deterministic fallback + reason]
+  R --> G[Deterministic Guardian]
+  F --> G
+  G -->|Blocked| S[Stop + audit]
+  G -->|Approval required| M[Merchant review]
+  G -->|Approved| A[Persistent bounded action]
+  A --> P[Razorpay Test or mock provider]
 ```
 
-Checkout verification is defense-in-depth and never marks a case recovered. Signed webhooks remain authoritative, so processing continues if the browser closes.
+The resolver classifies `NOT_CONFIGURED`, `TIMEOUT`, `RATE_LIMIT`, `INVALID_RESPONSE`, and `API_ERROR`. The fallback decision goes through the same Guardian and persistence path.
 
-## Persistence model
+## Data sent to OpenAI
 
-Prisma/PostgreSQL stores:
+- Transaction amount in paise, currency, coarse payment method, normalized failure evidence, attempt count, and elapsed time
+- Internal opaque customer ID and aggregate payment/recovery/contact/fatigue counts
+- Current case state and bounded previous action summaries
+- Guardian policy summary and known risk flags
 
-- `ProviderOrder`: Test order ID, receipt, amount, status, customer, verification result
-- `Payment`: original or recovery payment IDs, order ID, paise, failure details, provider metadata, provenance
-- `RecoveryCase`: state, economics, diagnosis, strategy, active link, recovered amount
-- `RecoveryDecision`: deterministic proposal and Guardian result
-- `RecoveryAction`: execution claim, provider link ID/URL/status/expiry, errors, metadata
-- `WebhookEvent`: raw normalized payload and unique `(provider, providerEventId)`
-- `AuditEvent`: append-oriented human and provider history
-- Merchant, Customer, Policy, and EvaluationRun support the surrounding product
+Excluded: names, email, phone, card data, full provider identifiers, API keys, webhook secrets, database credentials, raw payloads, and arbitrary internal metadata.
 
-## Idempotency and duplicate protection
+## Persistence and audit
 
-- Unique database constraint on webhook provider/event ID
-- Stable raw-body digest fallback when no provider event-ID header is present
-- Unique provider reference on recovery actions
-- Atomic `EXECUTING` claim before provider calls
-- Existing active link returned to repeated clicks
-- Paid recovery applied only if the case is not already recovered
-- Exact link ID, `pulseback_recovery_<caseId>` reference, and paise amount required
+`RecoveryDecision` stores category, diagnosis, action, confidence, probability, explanation, evidence, risk flags, wait, friction, urgency, provider, model, fallback reason, Guardian decision/reasons, and timestamp. Re-analysis inserts a new decision, cancels superseded pending actions, creates at most one new pending plan, and records append-only audit events.
 
-## Provider selection
+## Idempotency and execution safety
 
-`PaymentProvider` has real Razorpay Test and mock implementations. A Razorpay-origin case prefers the Test adapter only when the central configuration is complete and valid. Seeded/demo cases remain mock so a showcase never accidentally calls the provider. Missing credentials fall back; live or inconsistent keys are rejected.
-
-## Late authorization
-
-`payment.authorized` or `payment.captured` arriving before recovery execution cancels pending actions, marks the case `SELF_RECOVERED`, and records that no customer recovery contact occurred.
-
-## Failure handling
-
-Provider failures persist the action error, escalate the case, and do not claim that a link was delivered. Expired/cancelled links clear the active link and never increase recovered revenue.
+- Unique `(provider, providerEventId)` database constraint
+- Stable signed-body digest fallback for events without an ID header
+- Unique action provider references and active-link reuse
+- Atomic action execution claim
+- Exact link, reference, and paise amount required before recovery is counted
+- Late authorization cancels pending contact and marks self-recovery
+- OpenAI never runs inside the action executor or Recovery Lab

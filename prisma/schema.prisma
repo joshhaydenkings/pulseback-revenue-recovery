@@ -149,18 +149,27 @@ model RecoveryCase {
 model RecoveryDecision {
   id                           String       @id
   recoveryCaseId               String
+  failureCategory              String       @default("UNKNOWN")
+  diagnosis                    String       @default("Deterministic recovery analysis")
   recommendedAction            String
   confidence                   Float
   estimatedRecoveryProbability Float
   merchantExplanation          String
   supportingEvidence           Json
   riskFlags                    Json
+  suggestedWaitMinutes         Int?
+  customerFriction             String       @default("MEDIUM")
+  urgency                      String       @default("MEDIUM")
+  decisionProvider             String       @default("DETERMINISTIC")
+  model                        String?
+  fallbackReason               String?
   guardianDecision             String
   guardianReasons              Json
   createdAt                    DateTime     @default(now())
   recoveryCase                 RecoveryCase @relation(fields: [recoveryCaseId], references: [id], onDelete: Cascade)
 
   @@index([recoveryCaseId, createdAt])
+  @@index([decisionProvider, createdAt])
 }
 
 model RecoveryAction {

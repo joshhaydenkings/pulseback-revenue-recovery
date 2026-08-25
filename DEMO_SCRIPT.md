@@ -1,41 +1,35 @@
-# Five-minute Phase 3 demo script
+# Five-minute Phase 4 demo script
 
-## 0:00 — Safety status
+## 0:00 — Integration status
 
-Open `/integrations`. Show **Razorpay Test Mode — Connected**, masked key, webhook status, persistent counts, and **OpenAI disconnected — deterministic engine active**. Say: “This is Test Mode; no real money is involved.”
+Open `/integrations`. Show the Razorpay Test/provider state and the OpenAI provider, model, connection status, fallback counts, and last successful decision. No secrets are displayed. State clearly that no live money is involved.
 
-If credentials are intentionally absent, show **Demo Provider active** and use the fallback flow below without claiming real Razorpay calls.
+## 0:40 — AI Payment Autopsy
 
-## 0:40 — Real Test Order and signed failure
+Open `/demo`, enable **Use Live AI**, and run **Authentication Failure** for ₹4,999. Open the new case and show the separation between provider evidence, OpenAI diagnosis/recommendation/confidence, and Guardian authorization.
 
-Open `/demo/checkout`, choose ₹4,999, and start Razorpay Test Checkout. Explain that the Order was created server-side and persisted; only Razorpay collects card data. Trigger a Test payment failure.
+If no OpenAI key is available, leave the toggle off and explicitly demonstrate the deterministic `NOT_CONFIGURED` fallback instead of claiming a live AI call.
 
-Wait for the signed webhook to create a case. The browser polls only to surface the result—the webhook processing is independent of this page.
+## 1:35 — Guardian remains authoritative
 
-## 1:30 — Persistent recovery case
+Run **High-Value Approval** or **Customer Fatigue Stop**. Explain that the AI only recommends; amount, contact, attempt, risk, confidence, and operating-mode rules can still require review or block execution.
 
-Open the new case. Point to the **RAZORPAY TEST** provenance, real provider failure reason, order/payment association, deterministic diagnosis, Guardian decision, and audit timeline. Refresh to demonstrate persistence.
+## 2:15 — Safe re-analysis
 
-## 2:10 — Genuine Test Payment Link
+Click **Re-analyze with AI** on an active case. Show a new persisted decision and audit events. Confirm the case requires the normal approval path and that re-analysis did not execute or duplicate a payment action.
 
-Approve if required and click **Run Next Action**. Open the stored Razorpay Test Payment Link. Click the control again first to show that the same link is reused rather than duplicated.
+## 2:55 — Recovery execution
 
-## 2:50 — Recover exactly once
+Approve when required, run the next action, and show the one persisted Razorpay Test or simulated Payment Link. Click again to demonstrate active-link reuse. Complete the Test link only if Razorpay Test credentials are configured.
 
-Pay the Payment Link using Razorpay Test credentials. Wait for signed `payment_link.paid`, then show the same case as `RECOVERED`, recovered amount in the Overview, and provider IDs in Audit. Replay the provider event if available and show that no second case, action, or recovered amount appears.
+## 3:40 — Durable safety
 
-## 3:40 — Safety guards
+Refresh the page and show that the case, decisions, actions, and audit remain. Replay the same webhook and show no duplicate case/action. Use **Late Authorization** or **Provider API Failure** to demonstrate safe cancellation/escalation.
 
-Use Demo Console **Late Authorization** to show a pending recovery cancelled with no customer contact. Use **Provider API Failure** to show escalation without a duplicate action. Explain that expired/cancelled link events also never count recovery.
+## 4:25 — Deterministic benchmark
 
-## 4:20 — Recovery Lab
-
-Open `/lab`, run seed `PULSEBACK-2026`, and explicitly call the result a deterministic synthetic benchmark—not production evidence. Only its summary persists and it never calls Razorpay.
+Open `/lab`, run seed `PULSEBACK-2026`, and identify it as a reproducible synthetic benchmark. Recovery Lab intentionally does not call OpenAI; only the run summary persists.
 
 ## 4:50 — Close
 
-“PulseBack now connects a real Test payment lifecycle to a controlled recovery engine: signed events, durable state, policy authorization, one provider action, exact association, and an audit trail. OpenAI, notifications, and live money remain intentionally disabled.”
-
-## Credential-free fallback
-
-If Test credentials are unavailable, run **Authentication Failure** in `/demo`, open the resulting `PULSEBACK DEMO` case, execute its simulated link, then use **Payment Link Recovery**. Show that the same services, state transitions, dashboard, and audit update, while clearly stating that provider calls are mocked.
+“PulseBack uses OpenAI for bounded payment-recovery intelligence, deterministic Guardian policy for authority, PostgreSQL for durable exact-once state, and Razorpay Test Mode for provider proof. AI cannot move money or override policy.”
