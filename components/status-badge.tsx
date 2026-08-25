@@ -1,0 +1,2 @@
+const labels: Record<string, string> = { AWAITING_APPROVAL: 'Approval needed', PENDING_OBSERVATION: 'Observing', RECOVERING: 'Recovering', SCHEDULED: 'Scheduled', RECOVERED: 'Recovered', SELF_RECOVERED: 'Self-recovered', ESCALATED: 'Escalated', STOPPED: 'Stopped', PLAN_READY: 'Plan ready' };
+export function StatusBadge({ status }: { status: string }) { return <span className={`status status-${status.toLowerCase()}`}><i />{labels[status] ?? status}</span>; }

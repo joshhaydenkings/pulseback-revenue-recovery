@@ -1,0 +1,2 @@
+import { AppShell } from '../../components/app-shell';import { PageHeader } from '../../components/page-header';import { PolicyForm } from '../../components/interactive/policy-form';
+export default function Policies(){return <AppShell active="Policies"><PageHeader eyebrow="Deterministic authorization layer" title="Guardian Policies" description="Define the exact boundaries between AI recommendations and financial actions."/><PolicyForm/></AppShell>}

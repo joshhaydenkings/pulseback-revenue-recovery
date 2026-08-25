@@ -1,0 +1,2 @@
+import { AppShell } from '../../components/app-shell';import { PageHeader } from '../../components/page-header';import { LabConsole } from '../../components/interactive/lab-console';
+export default function Lab(){return <AppShell active="Recovery Lab"><PageHeader eyebrow="Deterministic strategy evaluation" title="Recovery Lab" description="Measure PulseBack against a fixed baseline across identical seeded synthetic cases."/><LabConsole/></AppShell>}
