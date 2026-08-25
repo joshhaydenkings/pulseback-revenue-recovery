@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  runtime  = "workerd"
+}
+
+generator nodeClient {
+  provider = "prisma-client"
+  output   = "../generated/prisma-node"
+  runtime  = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OperatingMode {
+  SHADOW
+  APPROVAL
+  AUTOPILOT
+}
+
+enum RecoveryStatus {
+  DETECTED
+  PENDING_OBSERVATION
+  ANALYZING
+  PLAN_READY
+  AWAITING_APPROVAL
+  SCHEDULED
+  ACTION_IN_PROGRESS
+  RECOVERING
+  RECOVERED
+  SELF_RECOVERED
+  ESCALATED
+  STOPPED
+  FAILED
+}
+
+enum ActionStatus {
+  PENDING
+  SCHEDULED
+  APPROVED
+  EXECUTING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REJECTED
+  SKIPPED
+}
+
+model Merchant {
+  id                        String         @id
+  name                      String
+  operatingMode             OperatingMode  @default(AUTOPILOT)
+  currency                  String         @default("INR")
+  autonomousAmountThreshold Int            @default(2500000)
+  observationWindowMinutes  Int            @default(12)
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  customers                 Customer[]
+  payments                  Payment[]
+  recoveryCases             RecoveryCase[]
+  auditEvents               AuditEvent[]
+  policy                    Policy?
+}
+
+model Customer {
+  id                      String         @id
+  merchantId              String
+  externalCustomerId      String
+  name                    String
+  email                   String
+  phone                   String?
+  totalSuccessfulPayments Int            @default(0)
+  totalFailedPayments     Int            @default(0)
+  lastContactAt           DateTime?
+  recoveryFatigueScore    Int            @default(0)
+  createdAt               DateTime       @default(now())
+  updatedAt               DateTime       @updatedAt
+  merchant                Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  payments                Payment[]
+  recoveryCases           RecoveryCase[]
+
+  @@unique([merchantId, externalCustomerId])
+  @@index([merchantId])
+}
+
+model Payment {
+  id                 String        @id
+  merchantId         String
+  customerId         String
+  provider           String
+  providerPaymentId  String
+  providerOrderId    String?
+  amount             Int
+  currency           String        @default("INR")
+  paymentMethod      String
+  status             String
+  failureCode        String?
+  failureDescription String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  merchant           Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer           Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  recoveryCase       RecoveryCase?
+
+  @@unique([provider, providerPaymentId])
+  @@index([merchantId, status])
+}
+
+model RecoveryCase {
+  id                           String             @id
+  merchantId                   String
+  customerId                   String
+  paymentId                    String             @unique
+  status                       RecoveryStatus
+  failureCategory              String
+  opportunityScore             Int
+  predictedRecoveryProbability Float
+  expectedRecoverableValue     Int
+  diagnosis                    String
+  currentStrategy              String
+  attempts                     Int                @default(0)
+  recoveredAmount              Int                @default(0)
+  recoveryStartedAt            DateTime?
+  recoveredAt                  DateTime?
+  nextActionAt                 DateTime?
+  activePaymentLinkId          String?
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
+  merchant                     Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer                     Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  payment                      Payment            @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  decisions                    RecoveryDecision[]
+  actions                      RecoveryAction[]
+  auditEvents                  AuditEvent[]
+
+  @@index([merchantId, status])
+  @@index([nextActionAt])
+}
+
+model RecoveryDecision {
+  id                           String       @id
+  recoveryCaseId               String
+  recommendedAction            String
+  confidence                   Float
+  estimatedRecoveryProbability Float
+  merchantExplanation          String
+  supportingEvidence           Json
+  riskFlags                    Json
+  guardianDecision             String
+  guardianReasons              Json
+  createdAt                    DateTime     @default(now())
+  recoveryCase                 RecoveryCase @relation(fields: [recoveryCaseId], references: [id], onDelete: Cascade)
+
+  @@index([recoveryCaseId, createdAt])
+}
+
+model RecoveryAction {
+  id                String       @id
+  recoveryCaseId    String
+  type              String
+  status            ActionStatus
+  providerReference String?
+  scheduledFor      DateTime?
+  executedAt        DateTime?
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  recoveryCase      RecoveryCase @relation(fields: [recoveryCaseId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([recoveryCaseId, status])
+}
+
+model AuditEvent {
+  id             String        @id
+  merchantId     String
+  recoveryCaseId String?
+  category       String
+  eventType      String
+  actor          String
+  message        String
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  merchant       Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  recoveryCase   RecoveryCase? @relation(fields: [recoveryCaseId], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, createdAt])
+  @@index([recoveryCaseId, createdAt])
+}
+
+model WebhookEvent {
+  id              String    @id
+  provider        String
+  providerEventId String
+  eventType       String
+  payload         Json
+  processedAt     DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@unique([provider, providerEventId])
+  @@index([createdAt])
+}
+
+model Policy {
+  id                                String        @id
+  merchantId                        String        @unique
+  operatingMode                     OperatingMode
+  autonomousAmountThresholdPaise    Int
+  observationWindowMinutes          Int
+  maxAttemptsPerCase                Int
+  contactsPer24h                    Int
+  contactsPer7d                     Int
+  minimumConfidence                 Float
+  highRiskAutoStop                  Boolean
+  newCustomerApprovalThresholdPaise Int
+  preventRepeatedAction             Boolean
+  fatigueStopThreshold              Int
+  createdAt                         DateTime      @default(now())
+  updatedAt                         DateTime      @updatedAt
+  merchant                          Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+}
+
+model EvaluationRun {
+  id                 String   @id
+  seed               String
+  caseCount          Int
+  revenueAtRisk      Int
+  baselineRecovered  Int
+  pulseBackRecovered Int
+  metrics            Json
+  createdAt          DateTime @default(now())
+
+  @@index([createdAt])
+}

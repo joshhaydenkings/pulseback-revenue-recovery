@@ -55,7 +55,7 @@ flowchart LR
   O --> DB[(Persistent adapter / Demo store)]
 ```
 
-The hosted demo uses deterministic in-memory records so it runs without credentials. The repository keeps UI components separate from domain services and provider interfaces, allowing a persistent relational adapter to replace the demo store without changing product pages.
+PulseBack now uses a repository boundary with PostgreSQL as the primary implementation and a deterministic in-memory provider when `DATABASE_URL` is absent and `DEMO_MODE=true`. Event processing, Guardian evaluation, case actions, due-action execution and audit writes stay behind server-side services rather than React components.
 
 ## Opportunity score
 
@@ -71,15 +71,32 @@ Requirements: Node.js 22.13 or newer.
 
 ```bash
 npm install
-copy .env.example .env.local
+copy .env.example .env
 npm run dev
 ```
 
 Open `http://localhost:3000`. The default is zero-credential demo mode.
 
+## PostgreSQL setup
+
+PostgreSQL is the primary Phase 2 data store. Monetary values are stored as integer paise. Prisma migrations use `DIRECT_URL`; the application runtime uses `DATABASE_URL`.
+
+- Local PostgreSQL or a Node-hosted deployment: set `DATABASE_DRIVER=pg` and `DATABASE_RUNTIME=node`. `DATABASE_URL` may be the normal pooled application connection and `DIRECT_URL` should be the direct migration connection. Start it with `npm run dev:postgres`.
+- Sites/Cloudflare deployment: use Neon PostgreSQL, `DATABASE_DRIVER=neon`, and `DATABASE_RUNTIME=workerd`. Use the Neon pooled/serverless URL for `DATABASE_URL` and its direct PostgreSQL URL for `DIRECT_URL`, because the hosted worker cannot open arbitrary raw TCP database sockets.
+
+```bash
+npm install
+npm run db:generate
+npm run db:deploy
+npm run db:seed
+npm run dev
+```
+
+For development migration work use `npm run db:migrate`. To recreate only a development database use `npm run db:reset`, followed by `npm run db:seed` if the reset prompt did not run the configured seed.
+
 ## Demo mode
 
-With `DEMO_MODE=true`, PulseBack uses:
+With `DEMO_MODE=true` and no `DATABASE_URL`, PulseBack uses the zero-config repository fallback with:
 
 - seeded Indian merchant-style customers and INR payments;
 - `MockDecisionEngine` with explainable failure heuristics;
@@ -143,7 +160,7 @@ npm test
 npm run build
 ```
 
-The test suite covers scoring, amount policy, fatigue, signature verification, webhook idempotency, late authorization, duplicate links, AI fallback, state transitions, seeded evaluation and safe provider failure.
+The test suite covers scoring, amount policy, fatigue, signature verification, persistent repository idempotency, case approval and stopping, operating-mode semantics, late authorization, duplicate links, due actions, dashboard aggregation, seeded evaluation and safe provider failure.
 
 ## Tech stack
 
@@ -151,7 +168,7 @@ Next.js-compatible App Router on Vinext, TypeScript, React 19, Tailwind CSS, Luc
 
 ## Further work
 
-- Durable multi-merchant Postgres/Supabase repository and row-level tenancy.
+- Authentication, merchant onboarding and row-level multi-tenant isolation.
 - Real email, SMS and WhatsApp adapters with opt-out handling.
 - Subscription and B2B invoice recovery.
 - Merchant-specific recovery models and contextual bandits.

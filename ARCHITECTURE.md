@@ -38,21 +38,23 @@ stateDiagram-v2
 - `lib/ai` owns structured decision engines and deterministic fallback.
 - `lib/razorpay` owns provider contracts, raw-body signatures and Test Mode API requests.
 - `services` coordinates idempotent events and bounded recovery execution.
+- `repositories` selects the PostgreSQL or zero-config demo provider and keeps persistence out of React.
+- `prisma` defines the PostgreSQL schema, migration history and deterministic seed.
 - `app/api` validates requests and exposes only server-safe operations.
 - `components` renders merchant-facing evidence and interactive demo controls.
 
-## Relational production model
+## Relational persistence model
 
-A production adapter should persist `Merchant`, `Customer`, `Payment`, `RecoveryCase`, `RecoveryDecision`, `RecoveryAction`, `AuditEvent`, `WebhookEvent`, `Policy`, and `EvaluationRun`. Important constraints:
+The primary Prisma/PostgreSQL adapter persists `Merchant`, `Customer`, `Payment`, `RecoveryCase`, `RecoveryDecision`, `RecoveryAction`, `AuditEvent`, `WebhookEvent`, `Policy`, and `EvaluationRun`. Important constraints:
 
 - unique `(provider, providerEventId)` on webhooks;
 - unique active Payment Link per recovery case;
 - indexes on `(merchantId, status, expectedRecoverableValue)` and `(recoveryCaseId, createdAt)`;
-- amount and recovered value stored in paise (`BIGINT`);
+- amount and recovered value stored as integer paise;
 - audit metadata as JSONB, with append-only application permissions;
 - tenant/merchant ID on every durable record.
 
-The hosted demo intentionally uses an in-memory adapter because Sites is Worker-based and raw TCP database clients are unsuitable there. A Supabase/PostgREST or other HTTP-based Postgres adapter is the recommended hosted production path.
+When `DATABASE_URL` is absent and `DEMO_MODE=true`, the repository factory selects the deterministic in-memory fallback. Sites is Worker-based, so a hosted PostgreSQL deployment uses the Neon serverless Prisma adapter; local/Node deployments use the Prisma PostgreSQL adapter. Both implementations expose the same repository contract.
 
 ## Failure handling
 
