@@ -19,7 +19,8 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset --force",
-    "verify:phase2": "tsx --env-file=.env.local scripts/verify-phase2.ts"
+    "verify:phase2": "tsx --env-file=.env.local scripts/verify-phase2.ts",
+    "verify:phase3": "tsx --env-file=.env.local scripts/verify-phase3.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

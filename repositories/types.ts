@@ -1,28 +1,39 @@
-import type { GuardianPolicies, RecoveryCase } from '../domain/recovery/types';
-import type { EvaluationResult } from '../domain/evaluation/simulator';
+import type { GuardianPolicies, RecoveryCase } from "../domain/recovery/types";
+import type { EvaluationResult } from "../domain/evaluation/simulator";
 
 export type SimulatorEventType =
-  | 'authentication_failure'
-  | 'insufficient_funds'
-  | 'bank_timeout'
-  | 'late_authorization'
-  | 'payment_captured'
-  | 'payment_link_paid'
-  | 'payment_link_error'
-  | 'repeated_failure'
-  | 'high_value_failure'
-  | 'exhausted_contact_limit';
+  | "authentication_failure"
+  | "insufficient_funds"
+  | "bank_timeout"
+  | "late_authorization"
+  | "payment_captured"
+  | "payment_link_paid"
+  | "payment_link_expired"
+  | "payment_link_cancelled"
+  | "payment_link_error"
+  | "repeated_failure"
+  | "high_value_failure"
+  | "exhausted_contact_limit";
 
 export interface RecoveryEventInput {
   provider: string;
   providerEventId: string;
   type: SimulatorEventType;
   providerPaymentId?: string;
+  providerOrderId?: string;
+  providerLinkId?: string;
+  providerLinkReference?: string;
+  providerLinkUrl?: string;
+  providerStatus?: string;
   caseId?: string;
   amountPaise?: number;
   customerName?: string;
   customerEmail?: string;
   paymentMethod?: string;
+  failureCode?: string;
+  failureDescription?: string;
+  providerMetadata?: Record<string, unknown>;
+  occurredAt?: string;
   payload?: Record<string, unknown>;
   injectProviderFailure?: boolean;
 }
@@ -35,7 +46,7 @@ export interface RecoveryEventResult {
   message: string;
 }
 
-export type CaseCommand = 'approve' | 'reject' | 'stop' | 'run' | 'escalate';
+export type CaseCommand = "approve" | "reject" | "stop" | "run" | "escalate";
 
 export interface CaseCommandResult {
   ok: true;
@@ -91,14 +102,21 @@ export interface DueActionResult {
 }
 
 export interface RecoveryRepository {
-  readonly kind: 'postgresql' | 'demo-memory';
+  readonly kind: "postgresql" | "demo-memory";
   listCases(): Promise<RecoveryCase[]>;
   getCase(id: string): Promise<RecoveryCase | undefined>;
   listAuditEvents(): Promise<AuditRecord[]>;
   getPolicies(): Promise<GuardianPolicies>;
-  savePolicies(policies: GuardianPolicies, actor?: string): Promise<GuardianPolicies>;
+  savePolicies(
+    policies: GuardianPolicies,
+    actor?: string,
+  ): Promise<GuardianPolicies>;
   processEvent(input: RecoveryEventInput): Promise<RecoveryEventResult>;
-  runCaseCommand(caseId: string, command: CaseCommand, reason?: string): Promise<CaseCommandResult>;
+  runCaseCommand(
+    caseId: string,
+    command: CaseCommand,
+    reason?: string,
+  ): Promise<CaseCommandResult>;
   processDueActions(now?: Date): Promise<DueActionResult>;
   getDashboard(): Promise<DashboardSnapshot>;
   saveEvaluation(result: EvaluationResult): Promise<EvaluationRunSummary>;

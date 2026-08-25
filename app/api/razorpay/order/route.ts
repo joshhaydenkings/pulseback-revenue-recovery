@@ -1,4 +1,25 @@
-import { z } from 'zod';
-import { MockPaymentProvider, RazorpayPaymentProvider } from '../../../../lib/razorpay/payment-provider';
-const schema=z.object({amountPaise:z.number().int().min(100).max(5_000_000)});
-export async function POST(request:Request){try{const input=schema.parse(await request.json());const configured=Boolean(process.env.RAZORPAY_KEY_ID&&process.env.RAZORPAY_KEY_SECRET);const provider=configured?new RazorpayPaymentProvider():new MockPaymentProvider();const order=await provider.createOrder({amountPaise:input.amountPaise,receipt:`pulseback_${Date.now()}`});return Response.json({...order,keyId:configured?process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID:null,simulated:!configured});}catch{return Response.json({error:'Unable to create Test Mode order'},{status:400});}}
+import { z } from "zod";
+import { createRazorpayTestOrder } from "../../../../services/razorpay-order-service";
+const schema = z.object({
+  amountPaise: z.number().int().min(100).max(5_000_000),
+  currency: z.literal("INR").default("INR"),
+  customerId: z.string().max(100).optional(),
+  scenario: z.string().max(100).optional(),
+});
+export async function POST(request: Request) {
+  try {
+    return Response.json(
+      await createRazorpayTestOrder(schema.parse(await request.json())),
+    );
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to create Test Mode order",
+      },
+      { status: 400 },
+    );
+  }
+}

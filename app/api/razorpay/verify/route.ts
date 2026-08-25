@@ -1,4 +1,91 @@
-import { z } from 'zod';
-import { verifyCheckoutSignature } from '../../../../lib/razorpay/signature';
-const schema=z.object({orderId:z.string(),paymentId:z.string(),signature:z.string()});
-export async function POST(request:Request){try{const x=schema.parse(await request.json());const secret=process.env.RAZORPAY_KEY_SECRET;if(!secret)return Response.json({error:'Razorpay Test Mode is not configured'},{status:503});return Response.json({verified:verifyCheckoutSignature(x.orderId,x.paymentId,x.signature,secret)});}catch{return Response.json({error:'Invalid verification payload'},{status:400});}}
+import { z } from "zod";
+import { databaseConfigured, getPrisma } from "../../../../lib/db/prisma";
+import { verifyCheckoutSignature } from "../../../../lib/razorpay/signature";
+import {
+  recordRazorpayAudit,
+  requireRazorpayTestConfiguration,
+} from "../../../../services/razorpay-integration-service";
+const schema = z.object({
+  orderId: z.string().min(1).max(100),
+  paymentId: z.string().min(1).max(100),
+  signature: z.string().regex(/^[a-f0-9]{64}$/i),
+});
+export async function POST(request: Request) {
+  try {
+    const input = schema.parse(await request.json());
+    const config = requireRazorpayTestConfiguration();
+    if (
+      !verifyCheckoutSignature(
+        input.orderId,
+        input.paymentId,
+        input.signature,
+        config.keySecret!,
+      )
+    ) {
+      await recordRazorpayAudit(
+        "CHECKOUT_SIGNATURE_REJECTED",
+        "Invalid Razorpay Checkout signature rejected.",
+        { providerOrderId: input.orderId },
+      );
+      return Response.json(
+        { verified: false, error: "Checkout signature verification failed" },
+        { status: 401 },
+      );
+    }
+    if (databaseConfigured()) {
+      const prisma = await getPrisma();
+      const order = await prisma.providerOrder.findUnique({
+        where: {
+          provider_providerOrderId: {
+            provider: "RAZORPAY",
+            providerOrderId: input.orderId,
+          },
+        },
+      });
+      if (!order)
+        return Response.json(
+          { verified: false, error: "Unknown Razorpay Test order" },
+          { status: 404 },
+        );
+      await prisma.$transaction([
+        prisma.providerOrder.update({
+          where: { id: order.id },
+          data: {
+            status: "checkout_verified",
+            verifiedPaymentId: input.paymentId,
+            checkoutVerifiedAt: new Date(),
+          },
+        }),
+        prisma.auditEvent.create({
+          data: {
+            id: crypto.randomUUID(),
+            merchantId: order.merchantId,
+            category: "RAZORPAY",
+            eventType: "CHECKOUT_SIGNATURE_VERIFIED",
+            actor: "RAZORPAY",
+            message:
+              "Razorpay Test Checkout signature verified. Waiting for the authoritative webhook.",
+            metadata: {
+              providerOrderId: input.orderId,
+              providerPaymentId: input.paymentId,
+            },
+          },
+        }),
+      ]);
+    }
+    return Response.json({
+      verified: true,
+      authoritativeState: "webhook_pending",
+    });
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Invalid verification payload",
+      },
+      { status: 400 },
+    );
+  }
+}

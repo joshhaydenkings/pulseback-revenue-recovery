@@ -1,65 +1,76 @@
-# PulseBack Architecture
+# PulseBack architecture
 
-## Design principles
+## Boundaries
 
-1. **The AI has advisory authority only.** It returns a validated diagnosis and proposed strategy.
-2. **Guardian is deterministic.** Amount, attempts, fatigue, contacts, risk, confidence and idempotency are code and policy values.
-3. **Execution is adapter-driven.** Mock and Razorpay providers implement the same interface.
-4. **State transitions are explicit.** Invalid transitions throw and are testable.
-5. **Events are idempotent.** Provider event IDs and case-level active-link checks prevent duplicated effects.
-6. **Synthetic evidence stays honest.** Recovery Lab numbers are reproducible simulations, not production claims.
+1. Razorpay secrets exist only in server configuration and the provider adapter.
+2. Checkout receives only the public Test key. PulseBack never handles card data.
+3. Raw webhook bytes are authenticated before JSON parsing or mutation.
+4. Razorpay and simulator payloads normalize into one `RecoveryEventInput` contract.
+5. PostgreSQL idempotency is claimed in the same transaction as recovery state changes.
+6. Deterministic Guardian policy—not an LLM—authorizes actions in Phase 3.
+7. Provider execution is claimed atomically before the external API call; an active stored link is reused.
 
-## Recovery lifecycle
+## Request flow
 
 ```mermaid
-stateDiagram-v2
-  [*] --> DETECTED
-  DETECTED --> PENDING_OBSERVATION
-  DETECTED --> ANALYZING
-  PENDING_OBSERVATION --> SELF_RECOVERED: authorization arrives
-  PENDING_OBSERVATION --> ANALYZING: grace window expires
-  ANALYZING --> PLAN_READY
-  PLAN_READY --> AWAITING_APPROVAL: Guardian requires review
-  PLAN_READY --> SCHEDULED: delayed action
-  PLAN_READY --> ACTION_IN_PROGRESS: Guardian approves
-  AWAITING_APPROVAL --> ACTION_IN_PROGRESS: merchant approves
-  ACTION_IN_PROGRESS --> RECOVERING
-  ACTION_IN_PROGRESS --> ESCALATED: provider fails safely
-  RECOVERING --> RECOVERED
-  RECOVERING --> ESCALATED
-  PLAN_READY --> STOPPED: fatigue / risk / attempts
+sequenceDiagram
+  participant U as Test customer
+  participant C as PulseBack Checkout
+  participant R as Razorpay Test API
+  participant W as Signed webhook route
+  participant P as Recovery service
+  participant DB as PostgreSQL
+
+  U->>C: Start Test Checkout
+  C->>R: Server creates Test Order
+  C->>DB: Persist ProviderOrder + audit
+  R-->>C: Standard Checkout result
+  C->>C: Server verifies Checkout signature
+  R->>W: payment.failed + HMAC signature
+  W->>W: Verify raw body, normalize event
+  W->>P: Shared RecoveryEventInput
+  P->>DB: Atomic event/payment/case/decision/action/audit
+  P->>R: Create Test Payment Link after Guardian approval
+  P->>DB: Persist link ID, URL, status, expiry, reference
+  U->>R: Pay Test Payment Link
+  R->>W: payment_link.paid + HMAC signature
+  W->>P: Same pipeline
+  P->>DB: Validate link + reference + amount; recover exactly once
 ```
 
-## Domain layers
+Checkout verification is defense-in-depth and never marks a case recovered. Signed webhooks remain authoritative, so processing continues if the browser closes.
 
-- `domain/recovery` owns typed states, actions, monetary scoring and transitions.
-- `domain/guardian` evaluates policy without network or UI dependencies.
-- `domain/evaluation` generates seeded cases and evaluates both strategies using identical outcome draws.
-- `lib/ai` owns structured decision engines and deterministic fallback.
-- `lib/razorpay` owns provider contracts, raw-body signatures and Test Mode API requests.
-- `services` coordinates idempotent events and bounded recovery execution.
-- `repositories` selects the PostgreSQL or zero-config demo provider and keeps persistence out of React.
-- `prisma` defines the PostgreSQL schema, migration history and deterministic seed.
-- `app/api` validates requests and exposes only server-safe operations.
-- `components` renders merchant-facing evidence and interactive demo controls.
+## Persistence model
 
-## Relational persistence model
+Prisma/PostgreSQL stores:
 
-The primary Prisma/PostgreSQL adapter persists `Merchant`, `Customer`, `Payment`, `RecoveryCase`, `RecoveryDecision`, `RecoveryAction`, `AuditEvent`, `WebhookEvent`, `Policy`, and `EvaluationRun`. Important constraints:
+- `ProviderOrder`: Test order ID, receipt, amount, status, customer, verification result
+- `Payment`: original or recovery payment IDs, order ID, paise, failure details, provider metadata, provenance
+- `RecoveryCase`: state, economics, diagnosis, strategy, active link, recovered amount
+- `RecoveryDecision`: deterministic proposal and Guardian result
+- `RecoveryAction`: execution claim, provider link ID/URL/status/expiry, errors, metadata
+- `WebhookEvent`: raw normalized payload and unique `(provider, providerEventId)`
+- `AuditEvent`: append-oriented human and provider history
+- Merchant, Customer, Policy, and EvaluationRun support the surrounding product
 
-- unique `(provider, providerEventId)` on webhooks;
-- unique active Payment Link per recovery case;
-- indexes on `(merchantId, status, expectedRecoverableValue)` and `(recoveryCaseId, createdAt)`;
-- amount and recovered value stored as integer paise;
-- audit metadata as JSONB, with append-only application permissions;
-- tenant/merchant ID on every durable record.
+## Idempotency and duplicate protection
 
-When `DATABASE_URL` is absent and `DEMO_MODE=true`, the repository factory selects the deterministic in-memory fallback. Sites is Worker-based, so a hosted PostgreSQL deployment uses the Neon serverless Prisma adapter; local/Node deployments use the Prisma PostgreSQL adapter. Both implementations expose the same repository contract.
+- Unique database constraint on webhook provider/event ID
+- Stable raw-body digest fallback when no provider event-ID header is present
+- Unique provider reference on recovery actions
+- Atomic `EXECUTING` claim before provider calls
+- Existing active link returned to repeated clicks
+- Paid recovery applied only if the case is not already recovered
+- Exact link ID, `pulseback_recovery_<caseId>` reference, and paise amount required
 
-## Failure handling
+## Provider selection
 
-Provider execution reserves the case/idempotency boundary before creating a Payment Link. If the provider throws, no link ID is recorded, no customer delivery is claimed, the attempt counter increments once, the case becomes `ESCALATED`, and the audit message is intentionally non-technical.
+`PaymentProvider` has real Razorpay Test and mock implementations. A Razorpay-origin case prefers the Test adapter only when the central configuration is complete and valid. Seeded/demo cases remain mock so a showcase never accidentally calls the provider. Missing credentials fall back; live or inconsistent keys are rejected.
 
 ## Late authorization
 
-Ambiguous bank/network failures enter `PENDING_OBSERVATION`. Authorization or capture during the window transitions directly to `SELF_RECOVERED`, removes `nextActionAt`, cancels any pending recovery and records that no customer contact occurred.
+`payment.authorized` or `payment.captured` arriving before recovery execution cancels pending actions, marks the case `SELF_RECOVERED`, and records that no customer recovery contact occurred.
+
+## Failure handling
+
+Provider failures persist the action error, escalate the case, and do not claim that a link was delivered. Expired/cancelled links clear the active link and never increase recovered revenue.

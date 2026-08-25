@@ -1,106 +1,137 @@
-# PulseBack setup
+# PulseBack Phase 3 setup
 
-## Requirements
+## 1. Requirements
 
-- Node.js 22.13 or newer
-- PostgreSQL 15 or newer for persistent mode
+- Node.js 22.13+
+- PostgreSQL 15+
+- A Razorpay account switched to **Test Mode** for genuine provider testing
+- A public HTTPS host or tunnel for local webhooks
 
-## Install
+## 2. Install
 
 ```powershell
 npm install
-Copy-Item .env.example .env
+Copy-Item .env.example .env.local
 ```
 
-`npm install` runs `prisma generate` automatically.
+`npm install` generates both Prisma clients.
 
-## Zero-config demo fallback
+## 3. Configure PostgreSQL
 
-Keep `DEMO_MODE=true` and leave `DATABASE_URL` empty:
+For a conventional local PostgreSQL server:
 
-```powershell
-npm run dev
+```text
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+DIRECT_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+DATABASE_DRIVER=pg
+DATABASE_RUNTIME=node
+DEMO_MODE=true
 ```
 
-This preserves the populated deterministic demo. It is server-driven but intentionally resets when the server process restarts.
+Never prefix database variables with `NEXT_PUBLIC_`.
 
-## Persistent PostgreSQL mode
+For Sites/Cloudflare, use Neon PostgreSQL because Workers cannot open arbitrary PostgreSQL TCP sockets. Set `DATABASE_DRIVER=neon`, `DATABASE_RUNTIME=workerd`, use the Neon pooled/serverless connection for `DATABASE_URL`, and its direct connection for `DIRECT_URL`.
 
-Set these variables in `.env`:
-
-- `DATABASE_URL`: the runtime application connection
-- `DIRECT_URL`: a direct PostgreSQL connection used by Prisma migrations
-- `DATABASE_DRIVER`: `pg` for local/Node PostgreSQL, or `neon` for Neon serverless PostgreSQL
-- `DATABASE_RUNTIME`: `node` for local PostgreSQL, or `workerd` for Sites/Cloudflare
-- `DEMO_MODE`: keep `true` while using synthetic Phase 2 scenarios
-
-Never expose either database URL through a `NEXT_PUBLIC_` variable.
-
-For local PostgreSQL and Node runtimes, `DATABASE_URL` may be a pooled connection and `DIRECT_URL` should be direct. For the Sites/Cloudflare worker deployment, use Neon: set `DATABASE_DRIVER=neon`, set `DATABASE_RUNTIME=workerd`, provide its pooled/serverless runtime URL as `DATABASE_URL`, and its direct URL as `DIRECT_URL`. Sites cannot open arbitrary raw TCP PostgreSQL connections.
-
-## Migration and seed
-
-Create a development migration after editing `prisma/schema.prisma`:
+## 4. Apply migrations and seed
 
 ```powershell
-npm run db:migrate -- --name describe_the_change
-```
-
-Apply committed migrations:
-
-```powershell
+npm run db:generate
 npm run db:deploy
-```
-
-Load the deterministic synthetic merchant, customers, payments, cases, decisions, actions, policies and audit history:
-
-```powershell
 npm run db:seed
 ```
 
-Reset a development database:
+For schema development:
+
+```powershell
+npm run db:migrate -- --name your_migration_name
+```
+
+To reset an explicitly configured development database:
 
 ```powershell
 npm run db:reset
 ```
 
-`db:reset` is destructive and must only target an explicitly configured development database.
+`db:reset` is destructive. Never point it at production data.
 
-## Run
+## 5. Configure Razorpay Test Mode
+
+In Razorpay Dashboard, switch to Test Mode and create Test API keys. Put only Test values in `.env.local`:
+
+```text
+NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_SECRET=...
+RAZORPAY_WEBHOOK_SECRET=...
+```
+
+The two key IDs must match. PulseBack rejects `rzp_live_` keys. Secrets remain server-only.
+
+Create a Razorpay Test webhook pointing to:
+
+```text
+https://YOUR_PUBLIC_HOST/api/webhooks/razorpay
+```
+
+Enable:
+
+- `payment.failed`
+- `payment.authorized`
+- `payment.captured`
+- `payment_link.paid`
+- `payment_link.expired`
+- `payment_link.cancelled`
+
+Use exactly the same webhook secret in Razorpay and `RAZORPAY_WEBHOOK_SECRET`.
+
+For local testing, expose port 3000 through a trusted HTTPS tunnel, place the resulting host in `NEXT_PUBLIC_SITE_URL`, and restart the app after changing environment variables. Do not put a tunnel authentication token in the repository.
+
+## 6. Run in VS Code
+
+Open the project folder and run this in the VS Code terminal:
 
 ```powershell
 npm run dev:postgres
 ```
 
-Open `http://localhost:3000`.
+Then open `http://localhost:3000`. Use `npm run dev` only for the Worker-compatible demo/Neon runtime.
 
-`npm run dev` remains the Worker-compatible command for zero-config fallback or Neon-backed Sites development. Use `npm run dev:postgres` for a conventional local PostgreSQL server over TCP.
+## 7. Judge flow
 
-## Verification
+1. Open `/integrations` and confirm **Razorpay Test Mode — Connected**, key masked, and webhook configured.
+2. Open `/demo/checkout`, create a Test Order, and use Razorpay Test Checkout.
+3. Cause a Test payment failure.
+4. Wait for the signed `payment.failed` webhook; the page polls only for display and is not required for processing.
+5. Open the new `RAZORPAY TEST` recovery case.
+6. Approve it if Guardian requires approval, then run the next action.
+7. Open the persisted Razorpay Test Payment Link and complete it with Test credentials.
+8. Confirm signed `payment_link.paid` marks the same case recovered once.
+9. Refresh and restart the server; state and event idempotency remain in PostgreSQL.
+
+No real money is involved.
+
+## 8. Verification commands
 
 ```powershell
 npm run lint
 npm run typecheck
 npm test
+npm run verify:phase3
 npm run build
 npm audit --omit=dev
 ```
 
-With a seeded development PostgreSQL database configured, the persistent Phase 2 verification is:
+The credential-free test suite validates signatures, payload mapping, adapter request/response mapping, provider errors, amount mismatch rejection, link terminal states, and exact-once recovery. `verify:phase3` additionally verifies the PostgreSQL repository with a Razorpay-origin event while safely using the mock provider if Test credentials are absent.
 
-```powershell
-npm run verify:phase2
-```
+## 9. Safe fallback
 
-It creates a ₹4,999 failure, confirms Payment/RecoveryCase/RecoveryAction persistence, processes a due action, completes simulated recovery, confirms dashboard aggregation, verifies duplicate-event protection and verifies policy persistence. It uses only mock providers.
+- Missing Razorpay Test credentials: **Demo Provider active**; no real Razorpay API request occurs.
+- Invalid/incomplete credentials: integration is blocked with a clear status.
+- Missing `DATABASE_URL` plus `DEMO_MODE=true`: deterministic in-memory repository; refreshes work, but a server restart resets state.
 
-## Scheduled processing
+## 10. Still mocked
 
-`POST /api/cron/recovery` queries actual scheduled actions whose `scheduledFor` time is due. If `CRON_SECRET` is configured, provide `Authorization: Bearer <secret>`. The Settings page provides a local **Process now** control.
-
-## Deliberately mocked in Phase 2
-
-- Deterministic decision engine; OpenAI is not called
-- Mock Payment Provider and DEMO/SIMULATED Payment Links
-- Mock notification execution; no email or SMS leaves the app
-- Razorpay signatures can be validated, but production Razorpay execution is not enabled
+- Deterministic diagnosis; OpenAI is disconnected for Phase 3
+- Email and SMS execution
+- Seeded demo cases and Recovery Lab
+- Live Razorpay and live money movement are prohibited

@@ -1,177 +1,141 @@
 # PulseBack
 
-**AI Revenue Recovery Autopilot**
+**AI Revenue Recovery Autopilot — Razorpay Test Mode build**
 
-> Failed doesn’t mean lost.
+> Failed does not mean lost.
 
-PulseBack is a safe, explainable recovery layer that sits beside Razorpay. It detects failed payments, diagnoses the likely cause, predicts the most suitable intervention, passes that proposal through deterministic financial policies, executes or schedules the bounded action, and records the full outcome.
+PulseBack detects failed payments, creates persistent recovery cases, applies deterministic Guardian policies, executes a bounded recovery action, and records the result. Phase 3 integrates the genuine Razorpay Test API and signed webhooks without enabling live money movement.
 
 Built for the Razorpay AI Buildathon — Track 03: AI Revenue Recovery.
 
-## Problem
+## Current authority model
 
-Payment failures, abandoned checkouts, network timeouts and failed recurring charges can erase revenue after purchase intent already exists. A naïve retry system either leaves money behind or over-contacts customers. Financial automation needs context, state, stopping rules and an auditable authorization boundary.
+**Deterministic diagnosis recommends → Guardian authorizes → provider adapter acts**
 
-## Solution
+OpenAI is not called in Phase 3. The existing deterministic engine remains the decision source. Real email and SMS are also disabled.
 
-PulseBack combines a typed recovery state machine, customer recovery memory, an AI diagnosis layer, the deterministic **Guardian** policy engine, idempotent provider adapters and measurable outcomes.
+## What is real in Phase 3
 
-The authority model is intentionally simple:
+- Razorpay Test Orders are created server-side and persisted as `ProviderOrder` records.
+- Standard Checkout uses only a public `rzp_test_` key; card data never enters PulseBack.
+- Checkout signatures and raw webhook bodies are verified server-side with HMAC SHA-256.
+- `payment.failed`, `payment.authorized`, `payment.captured`, `payment_link.paid`, `payment_link.expired`, and `payment_link.cancelled` enter the same recovery pipeline as the demo simulator.
+- Failed-payment metadata, provider IDs, orders, cases, decisions, actions, and audit events persist in PostgreSQL.
+- Razorpay Test Payment Links are created through the server-side provider adapter, stored on the original action, and reused instead of duplicated.
+- A paid link must match the stored link ID, case reference, and exact paise amount before recovery is counted.
+- Unique `(provider, providerEventId)` storage makes webhook replay safe across restarts. If Razorpay omits an event-ID header, PulseBack derives a stable ID from the signed raw body.
+- Expired or cancelled links never count recovery.
 
-**AI recommends → Guardian authorizes → Executor acts**
+## Safe fallback
 
-The AI never receives unrestricted provider tools or direct financial authority.
-
-## What makes PulseBack different
-
-- **Recovery Opportunity Score** — deterministic 0–100 priority using amount, predicted probability, history, attempts, fatigue, risk and duplicate-link state.
-- **Payment Autopsy** — concise evidence and merchant-facing diagnosis without hidden chain-of-thought.
-- **Late Authorization Guard** — observes ambiguous network failures and cancels recovery if authorization arrives late.
-- **Recovery Memory** — customer-level successes, attempts, contacts, preferences and fatigue shape every new case.
-- **Guardian** — editable limits for amount, attempts, contacts, confidence, risk and repeated actions.
-- **Shadow / Approval / Autopilot modes** — merchant-controlled authority.
-- **What If? simulator** — compares predicted recovery, value and friction across possible interventions.
-- **Revenue Leak Map** — shows failure category → intervention → outcome.
-- **Recovery Lab** — reproducible seeded comparison of Baseline vs PulseBack over 50–500 identical synthetic cases.
-- **Graceful provider failure** — a built-in action failure proves that duplicates are prevented and the case escalates safely.
+If Test credentials are absent, PulseBack clearly reports **Demo Provider active** and uses `MockPaymentProvider`. If `DATABASE_URL` is also absent and `DEMO_MODE=true`, the repository uses its deterministic in-memory fallback. Live `rzp_live_` credentials are explicitly rejected in this hackathon build.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  R[Razorpay / Simulator] --> W[Webhook Gateway]
-  W --> O[Recovery Orchestrator]
-  O --> S[Typed State Machine]
-  O --> D[Diagnosis Engine]
-  D --> AI[OpenAI Responses API\nStructured recommendation]
-  AI --> G[Guardian Policy Engine]
-  G -->|Approved| E[Action Executor]
-  G -->|Approval required| H[Merchant Review]
-  G -->|Blocked| X[Stop / Escalate]
-  E --> P[Razorpay Payment Links]
-  E --> N[Simulated Email / SMS]
-  O --> M[(Recovery Memory)]
-  O --> A[(Audit History)]
-  O --> DB[(Persistent adapter / Demo store)]
+  C[Razorpay Test Checkout] --> O[Server Order Service]
+  R[Razorpay signed webhook] --> V[Raw-body HMAC verification]
+  D[Demo scenarios] --> N[Normalized recovery event]
+  V --> N
+  N --> I[(Database idempotency)]
+  I --> P[Shared recovery pipeline]
+  P --> G[Deterministic diagnosis + Guardian]
+  G --> A[Persistent RecoveryAction]
+  A --> X{Provider adapter}
+  X -->|Razorpay-origin case + Test keys| T[Razorpay Test Payment Link]
+  X -->|Fallback or seeded demo case| M[Mock provider]
+  T --> W[Signed payment_link.paid webhook]
+  W --> P
+  P --> DB[(PostgreSQL + append-oriented audit)]
 ```
 
-PulseBack now uses a repository boundary with PostgreSQL as the primary implementation and a deterministic in-memory provider when `DATABASE_URL` is absent and `DEMO_MODE=true`. Event processing, Guardian evaluation, case actions, due-action execution and audit writes stay behind server-side services rather than React components.
-
-## Opportunity score
-
-The score combines:
-
-`probability value + log-adjusted amount + successful history + category weight − attempts − fatigue − risk − staleness − duplicate-link penalty`
-
-Expected recoverable value is `amount × adjusted recovery probability`. Both are deterministic and unit-tested; the AI does not invent these numbers.
+React components never receive Razorpay secrets and do not query arbitrary database tables. Routes call services; services use repository/provider boundaries.
 
 ## Quick start
 
-Requirements: Node.js 22.13 or newer.
+Requirements: Node.js 22.13+ and PostgreSQL 15+ for persistent mode.
 
-```bash
+```powershell
 npm install
-copy .env.example .env
-npm run dev
-```
-
-Open `http://localhost:3000`. The default is zero-credential demo mode.
-
-## PostgreSQL setup
-
-PostgreSQL is the primary Phase 2 data store. Monetary values are stored as integer paise. Prisma migrations use `DIRECT_URL`; the application runtime uses `DATABASE_URL`.
-
-- Local PostgreSQL or a Node-hosted deployment: set `DATABASE_DRIVER=pg` and `DATABASE_RUNTIME=node`. `DATABASE_URL` may be the normal pooled application connection and `DIRECT_URL` should be the direct migration connection. Start it with `npm run dev:postgres`.
-- Sites/Cloudflare deployment: use Neon PostgreSQL, `DATABASE_DRIVER=neon`, and `DATABASE_RUNTIME=workerd`. Use the Neon pooled/serverless URL for `DATABASE_URL` and its direct PostgreSQL URL for `DIRECT_URL`, because the hosted worker cannot open arbitrary raw TCP database sockets.
-
-```bash
-npm install
-npm run db:generate
+Copy-Item .env.example .env.local
 npm run db:deploy
 npm run db:seed
-npm run dev
+npm run dev:postgres
 ```
 
-For development migration work use `npm run db:migrate`. To recreate only a development database use `npm run db:reset`, followed by `npm run db:seed` if the reset prompt did not run the configured seed.
+Open `http://localhost:3000`.
 
-## Demo mode
+See [SETUP.md](./SETUP.md) for exact database, Test Mode webhook, and local public-host instructions.
 
-With `DEMO_MODE=true` and no `DATABASE_URL`, PulseBack uses the zero-config repository fallback with:
+## Razorpay Test Mode configuration
 
-- seeded Indian merchant-style customers and INR payments;
-- `MockDecisionEngine` with explainable failure heuristics;
-- an idempotent `MockPaymentProvider`;
-- simulated email/SMS delivery;
-- accelerated event scenarios and due-action processing;
-- a deterministic Recovery Lab with visible seed `PULSEBACK-2026`.
+Set these variables in `.env.local`:
 
-Synthetic metrics are labeled **Synthetic benchmark results**. Provider actions are labeled simulated. No production performance claim is made.
+```text
+NEXT_PUBLIC_RAZORPAY_KEY_ID
+RAZORPAY_KEY_ID
+RAZORPAY_KEY_SECRET
+RAZORPAY_WEBHOOK_SECRET
+```
 
-## Razorpay Test Mode setup
+Both key IDs must be the same `rzp_test_...` value. Configure the Razorpay Test webhook URL as:
 
-1. Create or use a Razorpay Test Mode account.
-2. Add the Test Mode key ID and secret to `.env.local`.
-3. Set `NEXT_PUBLIC_RAZORPAY_KEY_ID` to the same public Test Mode key ID.
-4. Create a strong webhook secret in Razorpay.
-5. Set the webhook URL to `https://YOUR_HOST/api/webhooks/razorpay`.
-6. Subscribe to `payment.failed`, `payment.authorized`, `payment.captured`, `payment_link.paid`, `payment_link.expired`, and `payment_link.cancelled`.
-7. Put that exact webhook secret in `RAZORPAY_WEBHOOK_SECRET` and restart the server.
+```text
+https://YOUR_PUBLIC_HOST/api/webhooks/razorpay
+```
 
-Webhook processing reads the raw body, verifies `X-Razorpay-Signature` with HMAC SHA-256, requires `x-razorpay-event-id`, ignores duplicates idempotently and accepts no unsigned webhook outside demo mode. Batch evaluation never calls Razorpay or consumes Test Mode Payment Links.
+Subscribe to:
 
-## OpenAI setup
+- `payment.failed`
+- `payment.authorized`
+- `payment.captured`
+- `payment_link.paid`
+- `payment_link.expired`
+- `payment_link.cancelled`
 
-Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL`. The server uses the official OpenAI SDK and Responses API with a strict JSON schema validated by Zod. Invalid output falls back to deterministic heuristics and is designed to create an audit event. Keys and model calls remain server-side.
+No real money is involved in Test Mode.
 
-## Routes
+## PostgreSQL
 
-| Route | Purpose |
-| --- | --- |
-| `/` | Revenue recovery overview and opportunity queue |
-| `/recoveries` | Searchable, filtered recovery queue |
-| `/recoveries/[id]` | Autopsy, AI proposal, Guardian, What If?, timeline and raw audit |
-| `/leaks` | Interactive revenue leak flow and category effectiveness |
-| `/lab` | Deterministic Baseline vs PulseBack benchmark |
-| `/policies` | Editable Guardian and operating-mode controls |
-| `/audit` | Filterable human-readable audit history |
-| `/integrations` | Credential-safe integration health |
-| `/demo` | Judge-friendly scripted scenarios |
-| `/demo/events` | Internal event simulator using the recovery pipeline |
-| `/demo/checkout` | Razorpay Standard Checkout Test Mode adapter |
+Amounts are integer paise. Prisma persists `Merchant`, `Customer`, `ProviderOrder`, `Payment`, `RecoveryCase`, `RecoveryDecision`, `RecoveryAction`, `AuditEvent`, `WebhookEvent`, `Policy`, and `EvaluationRun`.
 
-## Security model
+- Local PostgreSQL/Node: `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, run `npm run dev:postgres`.
+- Sites/Cloudflare: use Neon, `DATABASE_DRIVER=neon`, `DATABASE_RUNTIME=workerd`; use its pooled/serverless URL for `DATABASE_URL` and direct URL for `DIRECT_URL`.
 
-- Razorpay, OpenAI, database and cron secrets are server-only.
-- Webhooks use raw-body HMAC verification and unique provider event IDs.
-- Checkout signatures are verified server-side.
-- Incoming API payloads are validated with Zod.
-- Monetary values are paise in domain and API layers.
-- Card numbers and CVV are never collected or stored by PulseBack.
-- One active Payment Link per case is enforced before provider execution.
-- The AI proposes structured decisions; only Guardian can authorize execution.
-- Failed provider actions do not blindly retry or create duplicates.
+## Verification
 
-## Testing
-
-```bash
+```powershell
 npm run lint
 npm run typecheck
 npm test
+npm run verify:phase3
 npm run build
+npm audit --omit=dev
 ```
 
-The test suite covers scoring, amount policy, fatigue, signature verification, persistent repository idempotency, case approval and stopping, operating-mode semantics, late authorization, duplicate links, due actions, dashboard aggregation, seeded evaluation and safe provider failure.
+`verify:phase3` requires a seeded PostgreSQL database. It uses a Razorpay-origin event with the provider fallback, then proves durable case creation, one link action, exact-amount recovery, and duplicate suppression. Unit tests separately verify the real Razorpay HTTP adapter and error mapping without spending money or requiring credentials.
 
-## Tech stack
+## Main routes
 
-Next.js-compatible App Router on Vinext, TypeScript, React 19, Tailwind CSS, Lucide, Recharts, Zod, official OpenAI SDK and Vitest. Sites produces a Cloudflare Worker-compatible ESM build.
+| Route              | Purpose                                                   |
+| ------------------ | --------------------------------------------------------- |
+| `/`                | Database-backed recovery overview                         |
+| `/recoveries`      | Persistent recovery queue with Test/Demo provenance       |
+| `/recoveries/[id]` | Diagnosis, Guardian, actions, provider link, and timeline |
+| `/integrations`    | Safe Razorpay Test connection status and event counts     |
+| `/demo`            | Stateful internal scenarios using the shared pipeline     |
+| `/demo/checkout`   | Razorpay Test Order + Standard Checkout flow              |
+| `/audit`           | Persistent append-oriented audit trail                    |
+| `/policies`        | Persistent Guardian and operating mode                    |
+| `/lab`             | Deterministic synthetic benchmark                         |
 
-## Further work
+## Deliberately simulated or deferred
 
-- Authentication, merchant onboarding and row-level multi-tenant isolation.
-- Real email, SMS and WhatsApp adapters with opt-out handling.
-- Subscription and B2B invoice recovery.
-- Merchant-specific recovery models and contextual bandits.
-- Checkout abandonment telemetry and learned time-to-contact.
+- OpenAI and all LLM calls
+- Real email, SMS, or WhatsApp delivery
+- Live Razorpay credentials and live money movement
+- Authentication, production merchant onboarding, and multi-tenant isolation
+- Recovery Lab cases remain synthetic; only run summaries persist
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md), [SETUP.md](./SETUP.md), [DEMO_SCRIPT.md](./DEMO_SCRIPT.md) and [JUDGING_NOTES.md](./JUDGING_NOTES.md).
+See [ARCHITECTURE.md](./ARCHITECTURE.md), [DEMO_SCRIPT.md](./DEMO_SCRIPT.md), and [JUDGING_NOTES.md](./JUDGING_NOTES.md).

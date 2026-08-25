@@ -11,6 +11,8 @@ const categoryByEvent: Record<SimulatorEventType, FailureCategory> = {
   payment_captured: 'UNKNOWN',
   payment_link_paid: 'UNKNOWN',
   payment_link_error: 'AUTHENTICATION',
+  payment_link_expired: 'UNKNOWN',
+  payment_link_cancelled: 'UNKNOWN',
   repeated_failure: 'SUBSCRIPTION_FAILURE',
   high_value_failure: 'AUTHENTICATION',
   exhausted_contact_limit: 'CUSTOMER_ABANDONMENT',

@@ -61,6 +61,7 @@ model Merchant {
   payments                  Payment[]
   recoveryCases             RecoveryCase[]
   auditEvents               AuditEvent[]
+  providerOrders            ProviderOrder[]
   policy                    Policy?
 }
 
@@ -80,6 +81,7 @@ model Customer {
   merchant                Merchant       @relation(fields: [merchantId], references: [id], onDelete: Cascade)
   payments                Payment[]
   recoveryCases           RecoveryCase[]
+  providerOrders          ProviderOrder[]
 
   @@unique([merchantId, externalCustomerId])
   @@index([merchantId])
@@ -98,6 +100,11 @@ model Payment {
   status             String
   failureCode        String?
   failureDescription String?
+  failureSource      String?
+  failureStep        String?
+  failureReason      String?
+  providerMetadata   Json?
+  provenance         String        @default("PULSEBACK_DEMO")
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   merchant           Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -162,6 +169,9 @@ model RecoveryAction {
   type              String
   status            ActionStatus
   providerReference String?
+  providerUrl       String?
+  providerStatus    String?
+  providerExpiresAt DateTime?
   scheduledFor      DateTime?
   executedAt        DateTime?
   errorCode         String?
@@ -173,6 +183,30 @@ model RecoveryAction {
 
   @@index([status, scheduledFor])
   @@index([recoveryCaseId, status])
+  @@unique([providerReference])
+}
+
+model ProviderOrder {
+  id                String    @id
+  merchantId        String
+  customerId        String?
+  provider          String
+  providerOrderId   String
+  amount            Int
+  currency          String    @default("INR")
+  receipt           String
+  status            String
+  notes             Json?
+  verifiedPaymentId String?
+  checkoutVerifiedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  merchant          Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer          Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerOrderId])
+  @@unique([provider, receipt])
+  @@index([merchantId, createdAt])
 }
 
 model AuditEvent {

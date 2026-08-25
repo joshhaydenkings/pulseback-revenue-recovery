@@ -1,41 +1,41 @@
-# Five-minute Demo Script
+# Five-minute Phase 3 demo script
 
-## 0:00 — The problem
+## 0:00 — Safety status
 
-“A failed payment is revenue with existing customer intent. Most systems either retry blindly or stop too early. PulseBack adds diagnosis, memory, policy and measurable recovery.”
+Open `/integrations`. Show **Razorpay Test Mode — Connected**, masked key, webhook status, persistent counts, and **OpenAI disconnected — deterministic engine active**. Say: “This is Test Mode; no real money is involved.”
 
-## 0:30 — Overview
+If credentials are intentionally absent, show **Demo Provider active** and use the fallback flow below without claiming real Razorpay calls.
 
-Open `/`. Point to ₹54,299 recovered, active opportunities ranked by expected recoverable value, live Guardian activity, simulated-data label and Autopilot mode.
+## 0:40 — Real Test Order and signed failure
 
-## 1:00 — The hero recovery
+Open `/demo/checkout`, choose ₹4,999, and start Razorpay Test Checkout. Explain that the Order was created server-side and persisted; only Razorpay collects card data. Trigger a Test payment failure.
 
-Open `/demo`, run **Payment Link Recovery**, then open `RC-1039`. Show the ₹4,999 amount, 87/100 opportunity score and Payment Autopsy.
+Wait for the signed webhook to create a case. The browser polls only to surface the result—the webhook processing is independent of this page.
 
-## 1:30 — AI vs authority
+## 1:30 — Persistent recovery case
 
-In the case, show the structured AI recommendation and evidence. Then show the separate Guardian card: AI recommends; Guardian authorizes. Open **What If?** to explain why a fresh Payment Link beats an immediate retry.
+Open the new case. Point to the **RAZORPAY TEST** provenance, real provider failure reason, order/payment association, deterministic diagnosis, Guardian decision, and audit timeline. Refresh to demonstrate persistence.
 
-## 2:20 — Recovery outcome
+## 2:10 — Genuine Test Payment Link
 
-Use `RC-1012` to show the strong “₹9,999 RECOVERED” outcome and full event timeline. Explain that `payment_link.paid` is matched back to the original case.
+Approve if required and click **Run Next Action**. Open the stored Razorpay Test Payment Link. Click the control again first to show that the same link is reused rather than duplicated.
 
-## 2:50 — Late Authorization Guard
+## 2:50 — Recover exactly once
 
-Open `RC-1042` or run **Late Authorization**. Explain: failed → observing → authorized late → pending recovery cancelled → self-recovered with no customer contact.
+Pay the Payment Link using Razorpay Test credentials. Wait for signed `payment_link.paid`, then show the same case as `RECOVERED`, recovered amount in the Overview, and provider IDs in Audit. Replay the provider event if available and show that no second case, action, or recovered amount appears.
 
-## 3:25 — High-value safety
+## 3:40 — Safety guards
 
-Run **High-Value Approval** and open `RC-1048`. The AI recommends recovery, but Guardian requires merchant approval because ₹42,000 exceeds the ₹25,000 autonomous threshold.
+Use Demo Console **Late Authorization** to show a pending recovery cancelled with no customer contact. Use **Provider API Failure** to show escalation without a duplicate action. Explain that expired/cancelled link events also never count recovery.
 
-## 3:55 — Graceful failure
+## 4:20 — Recovery Lab
 
-Run **Provider API Failure** and open `RC-1029`. Show that link creation failed once, no duplicate action was created and the case escalated with a readable audit message.
+Open `/lab`, run seed `PULSEBACK-2026`, and explicitly call the result a deterministic synthetic benchmark—not production evidence. Only its summary persists and it never calls Razorpay.
 
-## 4:20 — Measurable batch evaluation
+## 4:50 — Close
 
-Open `/lab`. Run seed `PULSEBACK-2026` over 200 cases. Point to incremental synthetic recovery, lift vs baseline, zero PulseBack guardrail violations, category comparison and the funnel. Clearly say “synthetic benchmark, not a production claim.”
+“PulseBack now connects a real Test payment lifecycle to a controlled recovery engine: signed events, durable state, policy authorization, one provider action, exact association, and an audit trail. OpenAI, notifications, and live money remain intentionally disabled.”
 
-## 4:55 — Close
+## Credential-free fallback
 
-“PulseBack treats autonomous fintech AI as a controlled system: state, recovery economics, memory, idempotency, human approval, stopping rules and an audit trail — not just an LLM call.”
+If Test credentials are unavailable, run **Authentication Failure** in `/demo`, open the resulting `PULSEBACK DEMO` case, execute its simulated link, then use **Payment Link Recovery**. Show that the same services, state transitions, dashboard, and audit update, while clearly stating that provider calls are mocked.

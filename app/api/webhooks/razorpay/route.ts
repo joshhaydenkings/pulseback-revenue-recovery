@@ -1,6 +1,64 @@
-import { verifyRazorpaySignature } from '../../../../lib/razorpay/signature';
-import type { SimulatorEventType } from '../../../../repositories/types';
-import { processRecoveryEvent } from '../../../../services/recovery-event-pipeline';
-
-type RazorpayPayload={event?:string;payload?:{payment?:{entity?:{id?:string;amount?:number;method?:string;error_code?:string;error_description?:string;email?:string}};payment_link?:{entity?:{reference_id?:string}}}};
-export async function POST(request:Request){const rawBody=await request.text();const eventId=request.headers.get('x-razorpay-event-id');if(!eventId)return Response.json({error:'Missing event id'},{status:400});const isDemo=process.env.DEMO_MODE==='true';if(!isDemo){const secret=process.env.RAZORPAY_WEBHOOK_SECRET;const signature=request.headers.get('x-razorpay-signature')??'';if(!secret||!verifyRazorpaySignature(rawBody,signature,secret))return Response.json({error:'Invalid signature'},{status:401});}let payload:RazorpayPayload;try{payload=JSON.parse(rawBody) as RazorpayPayload}catch{return Response.json({error:'Invalid JSON'},{status:400})}const event=payload.event;if(!event)return Response.json({error:'Missing event type'},{status:400});const payment=payload.payload?.payment?.entity;let type:SimulatorEventType|undefined;if(event==='payment.failed'){const code=`${payment?.error_code??''} ${payment?.error_description??''}`.toLowerCase();type=code.includes('fund')?'insufficient_funds':code.includes('timeout')||code.includes('network')?'bank_timeout':'authentication_failure';}else if(event==='payment.authorized')type='late_authorization';else if(event==='payment.captured')type='payment_captured';else if(event==='payment_link.paid')type='payment_link_paid';if(!type)return Response.json({ok:true,ignored:true,event});const result=await processRecoveryEvent({provider:'RAZORPAY',providerEventId:eventId,type,providerPaymentId:payment?.id,caseId:payload.payload?.payment_link?.entity?.reference_id,amountPaise:payment?.amount,paymentMethod:payment?.method,payload:payload as unknown as Record<string,unknown>});return Response.json({...result,event,processed:!result.duplicate});}
+import { createHash } from "node:crypto";
+import { adaptRazorpayEvent } from "../../../../lib/razorpay/event-adapter";
+import { verifyRazorpaySignature } from "../../../../lib/razorpay/signature";
+import { processRecoveryEvent } from "../../../../services/recovery-event-pipeline";
+import {
+  recordRazorpayAudit,
+  requireRazorpayTestConfiguration,
+} from "../../../../services/razorpay-integration-service";
+export async function POST(request: Request) {
+  const rawBody = await request.text();
+  let config;
+  try {
+    config = requireRazorpayTestConfiguration({ webhook: true });
+  } catch (error) {
+    return Response.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Razorpay Test Mode webhook is not configured",
+      },
+      { status: 503 },
+    );
+  }
+  const signature = request.headers.get("x-razorpay-signature") ?? "";
+  if (!verifyRazorpaySignature(rawBody, signature, config.webhookSecret!)) {
+    await recordRazorpayAudit(
+      "INVALID_WEBHOOK_SIGNATURE_REJECTED",
+      "Invalid Razorpay webhook signature rejected.",
+      {
+        bodyDigest: createHash("sha256")
+          .update(rawBody)
+          .digest("hex")
+          .slice(0, 16),
+      },
+    );
+    return Response.json({ error: "Invalid signature" }, { status: 401 });
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return Response.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const providerEventId =
+    request.headers.get("x-razorpay-event-id") ||
+    `body_${createHash("sha256").update(rawBody).digest("hex")}`;
+  let normalized;
+  try {
+    normalized = adaptRazorpayEvent(payload, providerEventId);
+  } catch {
+    return Response.json(
+      { error: "Invalid Razorpay event payload" },
+      { status: 400 },
+    );
+  }
+  if (!normalized) return Response.json({ ok: true, ignored: true });
+  const result = await processRecoveryEvent(normalized);
+  return Response.json({
+    ...result,
+    event: (payload as { event?: string }).event,
+    processed: !result.duplicate,
+  });
+}
