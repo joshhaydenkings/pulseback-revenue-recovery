@@ -28,45 +28,86 @@ export async function recordRazorpayAudit(
 
 export async function getRazorpayIntegrationStatus() {
   const safe = publicRazorpayConfiguration();
-  if (!databaseConfigured())
+  let hasDatabase = false;
+  try {
+    hasDatabase = databaseConfigured();
+  } catch {
+    return {
+      ...safe,
+      storage: "unavailable",
+      lastWebhookEvent: null,
+      lastWebhookAt: null,
+      lastRecoveryAt: null,
+      ordersCreated: 0,
+      recoveryLinksCreated: 0,
+      successfulRecoveries: 0,
+    };
+  }
+  if (!hasDatabase)
     return {
       ...safe,
       storage: "demo-memory",
       lastWebhookEvent: null,
       lastWebhookAt: null,
+      lastRecoveryAt: null,
       ordersCreated: 0,
       recoveryLinksCreated: 0,
       successfulRecoveries: 0,
     };
-  const prisma = await getPrisma();
-  const [
-    lastWebhook,
-    ordersCreated,
-    recoveryLinksCreated,
-    successfulRecoveries,
-  ] = await Promise.all([
-    prisma.webhookEvent.findFirst({
-      where: { provider: "RAZORPAY" },
-      orderBy: { createdAt: "desc" },
-      select: { eventType: true, createdAt: true },
-    }),
-    prisma.providerOrder.count({ where: { merchantId, provider: "RAZORPAY" } }),
-    prisma.recoveryAction.count({
-      where: { providerReference: { startsWith: "plink_" } },
-    }),
-    prisma.recoveryCase.count({
-      where: { status: "RECOVERED", payment: { provider: "RAZORPAY" } },
-    }),
-  ]);
-  return {
-    ...safe,
-    storage: "postgresql",
-    lastWebhookEvent: lastWebhook?.eventType ?? null,
-    lastWebhookAt: lastWebhook?.createdAt.toISOString() ?? null,
-    ordersCreated,
-    recoveryLinksCreated,
-    successfulRecoveries,
-  };
+  try {
+    const prisma = await getPrisma();
+    const [
+      lastWebhook,
+      lastRecovery,
+      ordersCreated,
+      recoveryLinksCreated,
+      successfulRecoveries,
+    ] = await Promise.all([
+      prisma.webhookEvent.findFirst({
+        where: { provider: "RAZORPAY" },
+        orderBy: { createdAt: "desc" },
+        select: { eventType: true, createdAt: true },
+      }),
+      prisma.recoveryCase.findFirst({
+        where: { status: "RECOVERED", payment: { provider: "RAZORPAY" } },
+        orderBy: { recoveredAt: "desc" },
+        select: { recoveredAt: true, updatedAt: true },
+      }),
+      prisma.providerOrder.count({ where: { merchantId, provider: "RAZORPAY" } }),
+      prisma.recoveryAction.count({
+        where: { providerReference: { startsWith: "plink_" } },
+      }),
+      prisma.recoveryCase.count({
+        where: { status: "RECOVERED", payment: { provider: "RAZORPAY" } },
+      }),
+    ]);
+    return {
+      ...safe,
+      storage: "postgresql",
+      lastWebhookEvent: lastWebhook?.eventType ?? null,
+      lastWebhookAt: lastWebhook?.createdAt.toISOString() ?? null,
+      lastRecoveryAt: (
+        lastRecovery?.recoveredAt ?? lastRecovery?.updatedAt
+      )?.toISOString() ?? null,
+      ordersCreated,
+      recoveryLinksCreated,
+      successfulRecoveries,
+    };
+  } catch (error) {
+    console.error('[PulseBack:razorpay-status]', {
+      name: error instanceof Error ? error.name : typeof error,
+    });
+    return {
+      ...safe,
+      storage: 'unavailable',
+      lastWebhookEvent: null,
+      lastWebhookAt: null,
+      lastRecoveryAt: null,
+      ordersCreated: 0,
+      recoveryLinksCreated: 0,
+      successfulRecoveries: 0,
+    };
+  }
 }
 
 export function requireRazorpayTestConfiguration(

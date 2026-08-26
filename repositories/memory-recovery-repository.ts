@@ -1,4 +1,5 @@
 import type { EvaluationResult } from "../domain/evaluation/simulator";
+import { resolveNotificationProvider } from "../lib/notifications/notification-provider";
 import type {
   CustomerMemory,
   GuardianPolicies,
@@ -481,7 +482,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       guardianDecision: guardian.decision,
       guardianReasons: guardian.reasons,
       provenance:
-        input.provider === "RAZORPAY" ? "RAZORPAY_TEST" : "PULSEBACK_DEMO",
+        input.provider === "RAZORPAY" ? "RAZORPAY_TEST" : "SYNTHETIC_DEMO",
       timeline: [],
     };
     this.timeline(
@@ -861,6 +862,18 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
           case: cloneCase(recovery),
           message: "Mock provider failed safely; the case was escalated.",
         };
+      }
+      if (pending.type === "SEND_EMAIL_REMINDER") {
+        const delivery = await resolveNotificationProvider().sendRecoveryEmail({
+          recoveryCaseId: recovery.id,
+          customer: {
+            name: recovery.customerName,
+            email: recovery.customerEmail,
+          },
+          amountPaise: recovery.amountPaise,
+          paymentLinkUrl: recovery.activePaymentLinkUrl,
+        });
+        pending.providerReference = delivery.id;
       }
       pending.status = "SUCCEEDED";
       recovery.attempts += 1;

@@ -1,12 +1,160 @@
 'use client';
+
 import { useMemo, useState } from 'react';
 import { ChevronDown, Filter, Search } from 'lucide-react';
 import type { RecoveryCase } from '../../domain/recovery/types';
 import { formatCurrency } from '../../lib/format';
 import { StatusBadge } from '../status-badge';
 
+function provenanceLabel(recovery: RecoveryCase) {
+  return recovery.provenance === 'RAZORPAY_TEST'
+    ? 'RAZORPAY TEST'
+    : 'SYNTHETIC';
+}
+
 export function RecoveryTable({ cases }: { cases: RecoveryCase[] }) {
-  const [query, setQuery] = useState(''); const [status, setStatus] = useState('ALL'); const [category, setCategory] = useState('ALL');
-  const rows = useMemo(() => cases.filter(recovery => (`${recovery.id} ${recovery.paymentId} ${recovery.customerName}`.toLowerCase().includes(query.toLowerCase())) && (status === 'ALL' || recovery.status === status) && (category === 'ALL' || recovery.failureCategory === category)).sort((a,b)=>b.expectedRecoverableValuePaise-a.expectedRecoverableValuePaise), [query,status,category,cases]);
-  return <section className="panel recovery-list"><div className="filterbar"><label><Search size={15}/><input placeholder="Search customer, case or payment ID" value={query} onChange={event=>setQuery(event.target.value)}/></label><div className="filter-select"><Filter size={14}/><select value={status} onChange={event=>setStatus(event.target.value)}><option value="ALL">All statuses</option>{[...new Set(cases.map(recovery=>recovery.status))].map(value=><option key={value}>{value}</option>)}</select><ChevronDown size={13}/></div><div className="filter-select"><select value={category} onChange={event=>setCategory(event.target.value)}><option value="ALL">All failure types</option>{[...new Set(cases.map(recovery=>recovery.failureCategory))].map(value=><option key={value}>{value}</option>)}</select><ChevronDown size={13}/></div><span className="row-count">{rows.length} cases</span></div><div className="recovery-table-wrap"><div className="recovery-row recovery-header"><span>Case / Customer</span><span>Amount at risk</span><span>Failure</span><span>Opportunity</span><span>Recovery estimate</span><span>Strategy</span><span>Status</span></div>{rows.map(recovery=><a href={`/recoveries/${recovery.id}`} className="recovery-row" key={recovery.id}><span><b>{recovery.id}</b><small>{recovery.customerName} · {recovery.paymentId}</small><em className={`provenance provenance-${recovery.provenance?.toLowerCase()}`}>{recovery.provenance==='RAZORPAY_TEST'?'RAZORPAY TEST':'PULSEBACK DEMO'}</em></span><span><b>{formatCurrency(recovery.amountPaise/100)}</b><small>{formatCurrency(recovery.expectedRecoverableValuePaise/100)} expected</small></span><span><b>{recovery.failureCategory.replaceAll('_',' ')}</b><small>{recovery.paymentMethod}</small></span><span><b className="op-score">{recovery.opportunityScore}</b><small>of 100</small></span><span><b>{Math.round(recovery.predictedRecoveryProbability*100)}%</b><small>{Math.round(recovery.decision.confidence*100)}% confidence</small></span><span><b>{recovery.currentStrategy.replaceAll('_',' ')}</b><small>{recovery.operatingMode}</small></span><span><StatusBadge status={recovery.status}/></span></a>)}</div>{!rows.length&&<div className="empty-state">No recovery cases match these filters.</div>}</section>;
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState('ALL');
+  const [category, setCategory] = useState('ALL');
+  const [provenance, setProvenance] = useState('ALL');
+  const rows = useMemo(
+    () =>
+      cases
+        .filter(
+          (recovery) =>
+            `${recovery.id} ${recovery.paymentId} ${recovery.customerName}`
+              .toLowerCase()
+              .includes(query.toLowerCase()) &&
+            (status === 'ALL' || recovery.status === status) &&
+            (category === 'ALL' || recovery.failureCategory === category) &&
+            (provenance === 'ALL' ||
+              (provenance === 'RAZORPAY_TEST'
+                ? recovery.provenance === 'RAZORPAY_TEST'
+                : recovery.provenance !== 'RAZORPAY_TEST')),
+        )
+        .sort(
+          (a, b) =>
+            b.expectedRecoverableValuePaise - a.expectedRecoverableValuePaise,
+        ),
+    [query, status, category, provenance, cases],
+  );
+  return (
+    <section className="panel recovery-list">
+      <div className="filterbar">
+        <label>
+          <Search size={15} />
+          <input
+            placeholder="Search customer, case or payment ID"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+        <div className="filter-select">
+          <Filter size={14} />
+          <select
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            <option value="ALL">All statuses</option>
+            {[...new Set(cases.map((recovery) => recovery.status))].map(
+              (value) => (
+                <option key={value}>{value}</option>
+              ),
+            )}
+          </select>
+          <ChevronDown size={13} />
+        </div>
+        <div className="filter-select">
+          <select
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="ALL">All failure types</option>
+            {[...new Set(cases.map((recovery) => recovery.failureCategory))].map(
+              (value) => (
+                <option key={value}>{value}</option>
+              ),
+            )}
+          </select>
+          <ChevronDown size={13} />
+        </div>
+        <div className="filter-select">
+          <select
+            value={provenance}
+            onChange={(event) => setProvenance(event.target.value)}
+            aria-label="Filter by provider provenance"
+          >
+            <option value="ALL">All sources</option>
+            <option value="RAZORPAY_TEST">Razorpay Test</option>
+            <option value="SYNTHETIC">Synthetic</option>
+          </select>
+          <ChevronDown size={13} />
+        </div>
+        <span className="row-count">{rows.length} cases</span>
+      </div>
+      <div className="recovery-table-wrap">
+        <div className="recovery-row recovery-header">
+          <span>Case / Customer</span>
+          <span>Amount at risk</span>
+          <span>Failure</span>
+          <span>Opportunity</span>
+          <span>Recovery estimate</span>
+          <span>Strategy</span>
+          <span>Status</span>
+        </div>
+        {rows.map((recovery) => (
+          <a
+            href={`/recoveries/${recovery.id}`}
+            className="recovery-row"
+            key={recovery.id}
+          >
+            <span>
+              <b>{recovery.id}</b>
+              <small>
+                {recovery.customerName} · {recovery.paymentId}
+              </small>
+              <em
+                className={`provenance provenance-${recovery.provenance?.toLowerCase()}`}
+              >
+                {provenanceLabel(recovery)}
+              </em>
+            </span>
+            <span>
+              <b>{formatCurrency(recovery.amountPaise / 100)}</b>
+              <small>
+                {formatCurrency(recovery.expectedRecoverableValuePaise / 100)}{' '}
+                expected
+              </small>
+            </span>
+            <span>
+              <b>{recovery.failureCategory.replaceAll('_', ' ')}</b>
+              <small>{recovery.paymentMethod}</small>
+            </span>
+            <span>
+              <b className="op-score">{recovery.opportunityScore}</b>
+              <small>of 100</small>
+            </span>
+            <span>
+              <b>
+                {Math.round(recovery.predictedRecoveryProbability * 100)}%
+              </b>
+              <small>
+                {Math.round(recovery.decision.confidence * 100)}% confidence
+              </small>
+            </span>
+            <span>
+              <b>{recovery.currentStrategy.replaceAll('_', ' ')}</b>
+              <small>{recovery.operatingMode}</small>
+            </span>
+            <span>
+              <StatusBadge status={recovery.status} />
+            </span>
+          </a>
+        ))}
+      </div>
+      {!rows.length && (
+        <div className="empty-state">No recovery cases match these filters.</div>
+      )}
+    </section>
+  );
 }

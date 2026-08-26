@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { databaseConfigured, getPrisma } from "../../../../lib/db/prisma";
 import { verifyCheckoutSignature } from "../../../../lib/razorpay/signature";
+import { invalidRequestResponse, safeErrorResponse } from "../../../../lib/http/safe-response";
+import { enforceRateLimit, publicMutationLimits } from "../../../../lib/security/rate-limit";
 import {
   recordRazorpayAudit,
   requireRazorpayTestConfiguration,
@@ -11,6 +13,8 @@ const schema = z.object({
   signature: z.string().regex(/^[a-f0-9]{64}$/i),
 });
 export async function POST(request: Request) {
+  const limited = await enforceRateLimit(request, publicMutationLimits.razorpayVerify);
+  if (limited) return limited;
   try {
     const input = schema.parse(await request.json());
     const config = requireRazorpayTestConfiguration();
@@ -78,14 +82,13 @@ export async function POST(request: Request) {
       authoritativeState: "webhook_pending",
     });
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Invalid verification payload",
-      },
-      { status: 400 },
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return invalidRequestResponse("Invalid checkout verification payload");
+    }
+    return safeErrorResponse(
+      "razorpay-checkout-verification",
+      error,
+      "Unable to verify Razorpay Test Checkout",
     );
   }
 }

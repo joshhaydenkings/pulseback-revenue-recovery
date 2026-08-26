@@ -52,3 +52,20 @@ Excluded: names, email, phone, card data, full provider identifiers, API keys, w
 - Exact link, reference, and paise amount required before recovery is counted
 - Late authorization cancels pending contact and marks self-recovery
 - Hosted AI never runs inside the action executor or Recovery Lab
+
+## Hosted runtime
+
+```mermaid
+flowchart LR
+  J[Judge browser] --> H[Public HTTPS PulseBack]
+  R[Razorpay Test webhooks] --> H
+  H --> D[(Managed PostgreSQL)]
+  H --> G[Groq hosted AI]
+  C[External scheduler] -->|Bearer CRON_SECRET| H
+```
+
+`DATABASE_URL` is the pooled/serverless application connection. `DIRECT_URL` is used only by Prisma migration and intentional seed commands. Prisma is cached per runtime instance with a bounded pool. Generic Node hosts use the `pg` adapter; Workers-compatible deployments use the Neon serverless adapter and never open a raw TCP socket.
+
+Public mutation routes consume shared PostgreSQL rate-limit buckets. The signed Razorpay webhook is excluded from arbitrary throttling and continues to rely on raw-body HMAC verification plus durable idempotency. Client-facing route errors are generic; redacted diagnostics remain server-side.
+
+Email execution is behind `NotificationProvider`. This phase resolves it only to `MockNotificationProvider`, so no email, SMS, or WhatsApp message leaves PulseBack. A real email adapter is the next planned integration.

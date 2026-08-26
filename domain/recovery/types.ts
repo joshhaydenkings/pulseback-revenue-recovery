@@ -106,7 +106,10 @@ export interface RecoveryCase {
   guardianDecision: GuardianDecision;
   guardianReasons: string[];
   timeline: TimelineEvent[];
-  provenance?: "RAZORPAY_TEST" | "PULSEBACK_DEMO" | "SYNTHETIC_BENCHMARK";
+  provenance?:
+    | "RAZORPAY_TEST"
+    | "SYNTHETIC_DEMO"
+    | "SYNTHETIC_BENCHMARK";
   activePaymentLinkUrl?: string;
 }
 

@@ -3,15 +3,20 @@ import { Prisma, PrismaClient } from '../generated/prisma-node/client';
 import { DEFAULT_POLICIES } from '../domain/recovery/types';
 import { auditEvents, demoCases } from '../lib/demo-data';
 
-const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL ?? 'postgresql://pulseback:pulseback@localhost:54329/pulseback?schema=public';
+const connectionString = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DIRECT_URL or DATABASE_URL is required to seed demo data');
+}
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 const merchantId = 'merchant_demo';
 
 async function seed() {
-  await prisma.$transaction(async (tx) => {
-    await tx.merchant.deleteMany({ where: { id: merchantId } });
-    await tx.evaluationRun.deleteMany({});
-    await tx.webhookEvent.deleteMany({ where: { provider: { in: ['DEMO_SEED', 'SIMULATOR'] } } });
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.merchant.findUnique({
+      where: { id: merchantId },
+      select: { id: true },
+    });
+    if (existing) return false;
 
     await tx.merchant.create({
       data: {
@@ -69,6 +74,7 @@ async function seed() {
           status: recovery.status === 'RECOVERED' || recovery.status === 'SELF_RECOVERED' ? 'captured' : 'failed',
           failureCode: recovery.failureCategory,
           failureDescription: recovery.failureDescription,
+          provenance: 'SYNTHETIC_DEMO',
           createdAt: new Date(recovery.createdAt),
         },
       });
@@ -135,9 +141,16 @@ async function seed() {
         },
       });
     }
+    return true;
   }, { maxWait: 10_000, timeout: 30_000 });
 }
 
 seed()
-  .then(() => console.log(`Seeded ${demoCases.length} synthetic PulseBack recovery cases.`))
+  .then((created) =>
+    console.log(
+      created
+        ? `Seeded ${demoCases.length} synthetic PulseBack recovery cases.`
+        : 'Demo seed already exists; no records were changed.',
+    ),
+  )
   .finally(() => prisma.$disconnect());

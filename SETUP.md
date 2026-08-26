@@ -1,4 +1,4 @@
-# PulseBack Phase 4 setup
+# PulseBack hosted-readiness setup
 
 ## 1. Requirements
 
@@ -32,9 +32,12 @@ For Neon/Cloudflare, use its pooled/serverless URL for `DATABASE_URL`, direct UR
 npm run db:generate
 npm run db:deploy
 npm run db:seed
+npm run db:verify
 ```
 
-For schema development use `npm run db:migrate -- --name your_migration_name`. `npm run db:reset` is destructive and is only suitable for an explicitly configured development database.
+For schema development use `npm run db:migrate -- --name your_migration_name`. `npm run db:reset` is destructive and has a hard guard that permits localhost databases only. Never use reset for a hosted database. Use `npm run db:deploy` to apply committed migrations in deployment.
+
+`npm run db:seed` is intentional and idempotence-protected. If `merchant_demo` already exists, it exits without deleting, replacing, or duplicating data.
 
 ## 4. Configure Groq (optional)
 
@@ -76,6 +79,8 @@ npm run dev:postgres
 
 Open `http://localhost:3000`. Use `npm run dev` only for the Worker-compatible demo/Neon runtime.
 
+`npm run db:start` starts only the bundled local Prisma PostgreSQL server. A hosted application never runs it; it connects directly to managed PostgreSQL through `DATABASE_URL`.
+
 ## 7. Test AI safely
 
 1. Open `/integrations`; verify the displayed provider, model, and connection state.
@@ -94,6 +99,7 @@ npm run typecheck
 npm test
 npm run verify:phase2
 npm run verify:phase3
+npm run db:verify
 npm run build
 npm audit --omit=dev
 ```
@@ -109,3 +115,7 @@ npm audit --omit=dev
 - Email/SMS/WhatsApp execution
 - Live Razorpay and live money movement
 - Seed/demo data and Recovery Lab cases
+
+## 11. Hosted deployment
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for managed PostgreSQL, public HTTPS, Razorpay Test webhook, Groq, cron, and the final judge workflow.

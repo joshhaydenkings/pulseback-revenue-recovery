@@ -103,7 +103,7 @@ export default async function RecoveryDetail({
           <div className="case-id">
             <span>{c.id}</span>
             <StatusBadge status={c.status} />
-            <em>{c.provenance === "RAZORPAY_TEST" ? "RAZORPAY TEST" : "PULSEBACK DEMO"}</em>
+            <em>{c.provenance === "RAZORPAY_TEST" ? "RAZORPAY TEST" : "SYNTHETIC"}</em>
           </div>
           <h1>
             {formatCurrency(c.amountPaise / 100)} <span>at risk</span>

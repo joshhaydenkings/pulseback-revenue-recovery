@@ -41,10 +41,13 @@ npm install
 Copy-Item .env.example .env.local
 npm run db:deploy
 npm run db:seed
+npm run db:verify
 npm run dev:postgres
 ```
 
 Open `http://localhost:3000`. See [SETUP.md](./SETUP.md) for exact environment and webhook setup.
+
+For a public deployment with managed PostgreSQL, follow [DEPLOYMENT.md](./DEPLOYMENT.md). The hosted application connects directly through `DATABASE_URL`; it never runs `npm run db:start` and never depends on a developer laptop.
 
 ## Optional hosted AI configuration
 
@@ -84,6 +87,17 @@ Amounts are integer paise. Prisma persists merchants, customers, provider orders
 - Local Node/PostgreSQL: `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, `npm run dev:postgres`.
 - Sites/Cloudflare: Neon with `DATABASE_DRIVER=neon`, `DATABASE_RUNTIME=workerd`; use the pooled URL for `DATABASE_URL` and direct URL for `DIRECT_URL`.
 
+The Prisma client is cached per runtime instance to avoid needless connection pools. `npm run db:deploy` applies committed migrations without resetting data. `npm run db:seed` is explicit and skips an existing demo merchant rather than duplicating or replacing it. `npm run db:reset` refuses non-local databases.
+
+## Hosted readiness and security
+
+- `GET /api/health` returns only safe connection states, provider names, model names, and timestamps. It never returns credentials, keys, or secrets.
+- The Integrations page distinguishes PostgreSQL Connected/Demo/Unavailable, Razorpay Test, hosted AI/fallback, and simulated email.
+- Public mutation routes use shared PostgreSQL rate-limit buckets when the database is configured. The in-memory limiter exists only for the zero-config demo fallback.
+- The Razorpay webhook keeps raw-body HMAC verification and database idempotency; it is not blocked by arbitrary request throttling.
+- Security headers include MIME sniffing protection, a strict referrer policy, same-origin frame protection, a restrictive permissions policy, and HSTS on configured HTTPS builds. A CSP is intentionally deferred because an incomplete policy could break Razorpay Checkout.
+- `CRON_SECRET` is mandatory for `/api/cron/recovery`. The UI's clearly labeled demo control uses a separate rate-limited demo endpoint.
+
 ## Verification
 
 ```powershell
@@ -106,6 +120,7 @@ Tests use injected fake provider response boundaries; they never consume API cre
 | `/recoveries` | Persistent recovery queue |
 | `/recoveries/[id]` | Provider evidence, AI analysis, Guardian result, actions, timeline |
 | `/integrations` | Safe Razorpay and hosted-AI status without secrets |
+| `/api/health` | Safe deployment readiness status for monitoring |
 | `/demo` | Stateful scenarios, Live AI toggle, and synthetic AI decision test |
 | `/demo/checkout` | Razorpay Test Order and Standard Checkout |
 | `/audit` | Persistent append-oriented audit trail |

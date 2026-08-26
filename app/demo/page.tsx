@@ -9,9 +9,9 @@ export default async function Demo() {
   return (
     <AppShell active="Demo Console">
       <PageHeader
-        eyebrow="No credentials required"
+        eyebrow="DEMO / TEST ENVIRONMENT"
         title="PulseBack Demo Console"
-        description="Run reliable, deterministic scenarios for the complete five-minute revenue recovery story."
+        description="Run controlled synthetic scenarios for the complete five-minute recovery story. Razorpay remains Test Mode only."
         actions={
           <a className="secondary-button" href="/demo/events">
             <Radio size={14} /> Event simulator

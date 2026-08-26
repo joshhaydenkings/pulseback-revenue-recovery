@@ -104,7 +104,7 @@ model Payment {
   failureStep        String?
   failureReason      String?
   providerMetadata   Json?
-  provenance         String        @default("PULSEBACK_DEMO")
+  provenance         String        @default("SYNTHETIC_DEMO")
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   merchant           Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
@@ -278,4 +278,18 @@ model EvaluationRun {
   createdAt          DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model RateLimitBucket {
+  id           String   @id
+  scope        String
+  identityHash String
+  windowStart  DateTime
+  count        Int      @default(1)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([expiresAt])
+  @@index([scope, windowStart])
 }

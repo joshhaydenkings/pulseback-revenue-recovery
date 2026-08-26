@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { adaptRazorpayEvent } from "../../../../lib/razorpay/event-adapter";
 import { verifyRazorpaySignature } from "../../../../lib/razorpay/signature";
+import { safeErrorResponse } from "../../../../lib/http/safe-response";
 import { processRecoveryEvent } from "../../../../services/recovery-event-pipeline";
 import {
   recordRazorpayAudit,
@@ -12,28 +13,31 @@ export async function POST(request: Request) {
   try {
     config = requireRazorpayTestConfiguration({ webhook: true });
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Razorpay Test Mode webhook is not configured",
-      },
-      { status: 503 },
+    return safeErrorResponse(
+      "razorpay-webhook-configuration",
+      error,
+      "Razorpay Test webhook is unavailable",
+      503,
     );
   }
   const signature = request.headers.get("x-razorpay-signature") ?? "";
   if (!verifyRazorpaySignature(rawBody, signature, config.webhookSecret!)) {
-    await recordRazorpayAudit(
-      "INVALID_WEBHOOK_SIGNATURE_REJECTED",
-      "Invalid Razorpay webhook signature rejected.",
-      {
-        bodyDigest: createHash("sha256")
-          .update(rawBody)
-          .digest("hex")
-          .slice(0, 16),
-      },
-    );
+    try {
+      await recordRazorpayAudit(
+        "INVALID_WEBHOOK_SIGNATURE_REJECTED",
+        "Invalid Razorpay webhook signature rejected.",
+        {
+          bodyDigest: createHash("sha256")
+            .update(rawBody)
+            .digest("hex")
+            .slice(0, 16),
+        },
+      );
+    } catch (error) {
+      console.error('[PulseBack:webhook-rejection-audit]', {
+        name: error instanceof Error ? error.name : typeof error,
+      });
+    }
     return Response.json({ error: "Invalid signature" }, { status: 401 });
   }
   let payload: unknown;
@@ -55,10 +59,18 @@ export async function POST(request: Request) {
     );
   }
   if (!normalized) return Response.json({ ok: true, ignored: true });
-  const result = await processRecoveryEvent(normalized);
-  return Response.json({
-    ...result,
-    event: (payload as { event?: string }).event,
-    processed: !result.duplicate,
-  });
+  try {
+    const result = await processRecoveryEvent(normalized);
+    return Response.json({
+      ...result,
+      event: (payload as { event?: string }).event,
+      processed: !result.duplicate,
+    });
+  } catch (error) {
+    return safeErrorResponse(
+      'razorpay-webhook-processing',
+      error,
+      'Webhook could not be processed',
+    );
+  }
 }

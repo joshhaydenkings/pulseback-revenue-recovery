@@ -38,16 +38,28 @@ export async function getAIIntegrationStatus(): Promise<AIIntegrationStatus> {
       configuredProvider === "GROQ" ? "GROQ_MODEL" : "OPENAI_MODEL",
     ],
   };
-  if (!databaseConfigured())
+  let hasDatabase = false;
+  try {
+    hasDatabase = databaseConfigured();
+  } catch {
+    return {
+      ...base,
+      status: configured ? "degraded" : "not-configured",
+      recentAIDecisions: 0,
+      fallbackDecisions: 0,
+    };
+  }
+  if (!hasDatabase)
     return {
       ...base,
       status: configured ? "connected" : "not-configured",
       recentAIDecisions: 0,
       fallbackDecisions: 0,
     };
-  const prisma = await getPrisma();
-  const [recentAIDecisions, fallbackDecisions, lastSuccess, lastFallback] =
-    await Promise.all([
+  try {
+    const prisma = await getPrisma();
+    const [recentAIDecisions, fallbackDecisions, lastSuccess, lastFallback] =
+      await Promise.all([
       prisma.recoveryDecision.count({
         where: { decisionProvider: configuredProvider },
       }),
@@ -64,17 +76,28 @@ export async function getAIIntegrationStatus(): Promise<AIIntegrationStatus> {
         orderBy: { createdAt: "desc" },
         select: { createdAt: true },
       }),
-    ]);
-  const degraded = Boolean(
-    configured &&
-      lastFallback &&
-      (!lastSuccess || lastFallback.createdAt > lastSuccess.createdAt),
-  );
-  return {
-    ...base,
-    status: configured ? (degraded ? "degraded" : "connected") : "not-configured",
-    recentAIDecisions,
-    fallbackDecisions,
-    lastSuccessfulAIDecision: lastSuccess?.createdAt.toISOString(),
-  };
+      ]);
+    const degraded = Boolean(
+      configured &&
+        lastFallback &&
+        (!lastSuccess || lastFallback.createdAt > lastSuccess.createdAt),
+    );
+    return {
+      ...base,
+      status: configured ? (degraded ? "degraded" : "connected") : "not-configured",
+      recentAIDecisions,
+      fallbackDecisions,
+      lastSuccessfulAIDecision: lastSuccess?.createdAt.toISOString(),
+    };
+  } catch (error) {
+    console.error('[PulseBack:ai-status]', {
+      name: error instanceof Error ? error.name : typeof error,
+    });
+    return {
+      ...base,
+      status: configured ? 'degraded' : 'not-configured',
+      recentAIDecisions: 0,
+      fallbackDecisions: 0,
+    };
+  }
 }

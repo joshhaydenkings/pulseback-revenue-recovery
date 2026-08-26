@@ -1,4 +1,53 @@
 import { z } from 'zod';
+import { invalidRequestResponse, safeErrorResponse } from '../../../../lib/http/safe-response';
+import { enforceRateLimit, publicMutationLimits } from '../../../../lib/security/rate-limit';
 import { processRecoveryEvent } from '../../../../services/recovery-event-pipeline';
-const schema=z.object({type:z.enum(['authentication_failure','insufficient_funds','bank_timeout','late_authorization','payment_captured','payment_link_paid','payment_link_error','repeated_failure','high_value_failure','exhausted_contact_limit']),caseId:z.string().optional(),providerPaymentId:z.string().optional(),amountPaise:z.number().int().positive().optional(),providerEventId:z.string().optional()});
-export async function POST(request:Request){try{const input=schema.parse(await request.json());const eventId=input.providerEventId??`evt_sim_${Date.now()}_${crypto.randomUUID().slice(0,8)}`;const result=await processRecoveryEvent({provider:'SIMULATOR',providerEventId:eventId,type:input.type,caseId:input.caseId,providerPaymentId:input.providerPaymentId,amountPaise:input.amountPaise,payload:input});return Response.json({...result,simulated:true,type:input.type});}catch(error){return Response.json({error:error instanceof Error?error.message:'Invalid simulated event'},{status:400});}}
+
+const schema = z.object({
+  type: z.enum([
+    'authentication_failure',
+    'insufficient_funds',
+    'bank_timeout',
+    'late_authorization',
+    'payment_captured',
+    'payment_link_paid',
+    'payment_link_error',
+    'repeated_failure',
+    'high_value_failure',
+    'exhausted_contact_limit',
+  ]),
+  caseId: z.string().optional(),
+  providerPaymentId: z.string().optional(),
+  amountPaise: z.number().int().positive().optional(),
+  providerEventId: z.string().optional(),
+});
+
+export async function POST(request: Request) {
+  const limited = await enforceRateLimit(request, publicMutationLimits.demoEvent);
+  if (limited) return limited;
+  try {
+    const input = schema.parse(await request.json());
+    const eventId =
+      input.providerEventId ??
+      `evt_sim_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    const result = await processRecoveryEvent({
+      provider: 'SIMULATOR',
+      providerEventId: eventId,
+      type: input.type,
+      caseId: input.caseId,
+      providerPaymentId: input.providerPaymentId,
+      amountPaise: input.amountPaise,
+      payload: input,
+    });
+    return Response.json({ ...result, simulated: true, type: input.type });
+  } catch (error) {
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      return invalidRequestResponse('Invalid simulated event');
+    }
+    return safeErrorResponse(
+      'demo-event',
+      error,
+      'Unable to process the simulated event',
+    );
+  }
+}

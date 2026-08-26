@@ -1,19 +1,24 @@
 import { getRecoveryRepository } from "../../../../../repositories/recovery-repository";
+import { safeErrorResponse } from "../../../../../lib/http/safe-response";
+import { enforceRateLimit, publicMutationLimits } from "../../../../../lib/security/rate-limit";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const limited = await enforceRateLimit(
+    request,
+    publicMutationLimits.recoveryReanalysis,
+  );
+  if (limited) return limited;
   try {
     const { id } = await params;
     return Response.json(await getRecoveryRepository().reanalyzeCase(id));
   } catch (error) {
-    return Response.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Unable to re-analyze case",
-      },
-      { status: 400 },
+    return safeErrorResponse(
+      "recovery-reanalysis",
+      error,
+      "Unable to re-analyze this recovery case",
     );
   }
 }

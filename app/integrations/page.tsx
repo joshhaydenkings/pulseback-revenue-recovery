@@ -2,6 +2,7 @@ import {
   Bot,
   Check,
   Copy,
+  Database,
   ExternalLink,
   Mail,
   PlugZap,
@@ -12,13 +13,22 @@ import { AppShell } from "../../components/app-shell";
 import { PageHeader } from "../../components/page-header";
 import { getRazorpayIntegrationStatus } from "../../services/razorpay-integration-service";
 import { getAIIntegrationStatus } from "../../services/ai-integration-service";
+import { getDatabaseHealthStatus } from "../../services/database-health-service";
+import { razorpayWebhookUrl, siteUrlConfigured } from "../../lib/site-url";
 
 export default async function Integrations() {
-  const [razor, ai] = await Promise.all([
+  const [database, razor, ai] = await Promise.all([
+    getDatabaseHealthStatus(),
     getRazorpayIntegrationStatus(),
     getAIIntegrationStatus(),
   ]);
   const connected = razor.status === "connected";
+  const razorState = connected
+    ? "connected"
+    : razor.status === "demo"
+      ? "demo"
+      : "unavailable";
+  const aiState = ai.status === "connected" ? "connected" : "demo";
   return (
     <AppShell active="Integrations">
       <PageHeader
@@ -28,9 +38,24 @@ export default async function Integrations() {
       />
       <div className="integration-grid">
         <Integration
+          name="Database"
+          icon={<Database />}
+          state={database.status}
+          badge={database.status === "connected" ? "CONNECTED" : database.status === "demo" ? "DEMO" : "UNAVAILABLE"}
+          description={database.status === "connected" ? "PostgreSQL is the authoritative recovery store." : database.status === "demo" ? "In-memory demo fallback is active. State resets on restart." : "PostgreSQL is configured but currently unavailable."}
+          rows={[
+            ["Provider", "PostgreSQL"],
+            ["Connection", database.status === "connected" ? "Connected" : database.status === "demo" ? "Demo fallback" : "Unavailable"],
+            ["Driver", database.driver === "neon" ? "Neon serverless" : "PostgreSQL TCP"],
+            ["Runtime", database.runtime],
+            ["Last recovery", database.lastRecoveryAt ? new Date(database.lastRecoveryAt).toLocaleString("en-IN") : "â€”"],
+          ]}
+          env={["DATABASE_URL", "DIRECT_URL", "DATABASE_DRIVER", "DATABASE_RUNTIME"]}
+        />
+        <Integration
           name="Razorpay"
           icon={<PlugZap />}
-          connected={connected}
+          state={razorState}
           badge={connected ? "RAZORPAY TEST" : "DEMO PROVIDER"}
           description={
             connected
@@ -49,6 +74,8 @@ export default async function Integrations() {
             ["Mode", "TEST"],
             ["Provider", connected ? "Razorpay" : "PulseBack Demo Provider"],
             ["Key ID", razor.keyId ?? "Not configured"],
+            ["Public site", siteUrlConfigured() ? "Configured" : "Local fallback"],
+            ["Webhook URL", razorpayWebhookUrl()],
             [
               "Webhook",
               razor.webhookConfigured
@@ -65,6 +92,7 @@ export default async function Integrations() {
             ["Orders created", String(razor.ordersCreated)],
             ["Recovery links created", String(razor.recoveryLinksCreated)],
             ["Successful Test recoveries", String(razor.successfulRecoveries)],
+            ["Last Test recovery", razor.lastRecoveryAt ? new Date(razor.lastRecoveryAt).toLocaleString("en-IN") : "â€”"],
           ]}
           env={[
             "NEXT_PUBLIC_RAZORPAY_KEY_ID",
@@ -76,7 +104,7 @@ export default async function Integrations() {
         <Integration
           name={ai.configuredProvider === "GROQ" ? "Groq" : "OpenAI"}
           icon={<Bot />}
-          connected={ai.status !== "not-configured"}
+          state={aiState}
           badge={
             ai.status === "connected"
               ? "CONNECTED"
@@ -109,7 +137,7 @@ export default async function Integrations() {
         <Integration
           name="Notifications"
           icon={<Mail />}
-          connected
+          state="demo"
           badge="SIMULATED"
           description="Customer recovery contact adapters. No messages leave demo mode."
           rows={[
@@ -154,7 +182,7 @@ export default async function Integrations() {
 function Integration({
   name,
   icon,
-  connected,
+  state,
   badge,
   description,
   rows,
@@ -162,12 +190,13 @@ function Integration({
 }: {
   name: string;
   icon: React.ReactNode;
-  connected: boolean;
+  state: "connected" | "demo" | "unavailable";
   badge: string;
   description: string;
   rows: string[][];
   env: string[];
 }) {
+  const connected = state === "connected";
   return (
     <article className="panel integration-card">
       <div className="integration-head">
@@ -176,7 +205,7 @@ function Integration({
           <h2>{name}</h2>
           <p>{description}</p>
         </div>
-        <em className={connected ? "connected" : ""}>
+        <em className={state}>
           <i />
           {badge}
         </em>

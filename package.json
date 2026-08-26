@@ -20,7 +20,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "db:reset": "prisma migrate reset --force",
+    "db:verify": "tsx scripts/verify-database.ts",
+    "db:reset": "tsx scripts/reset-development-database.ts",
     "verify:phase2": "tsx --env-file=.env.local scripts/verify-phase2.ts",
     "verify:phase3": "tsx --env-file=.env.local scripts/verify-phase3.ts"
   },

@@ -35,6 +35,7 @@ export interface PaymentProvider {
     referenceId: string;
     customer: { name: string; email: string };
     expiresAt?: string;
+    callbackUrl?: string;
     notes?: Record<string, string>;
   }): Promise<PaymentLink>;
   getPaymentLink?(id: string): Promise<PaymentLink>;
@@ -73,6 +74,7 @@ export class MockPaymentProvider implements PaymentProvider {
     referenceId: string;
     customer: { name: string; email: string };
     expiresAt?: string;
+    callbackUrl?: string;
   }) {
     if (this.injectFailure)
       throw new RazorpayProviderError(
@@ -198,6 +200,7 @@ export class RazorpayPaymentProvider implements PaymentProvider {
     referenceId: string;
     customer: { name: string; email: string };
     expiresAt?: string;
+    callbackUrl?: string;
     notes?: Record<string, string>;
   }) {
     const result = await this.call<{
@@ -218,6 +221,8 @@ export class RazorpayPaymentProvider implements PaymentProvider {
         expire_by: input.expiresAt
           ? Math.floor(new Date(input.expiresAt).getTime() / 1000)
           : undefined,
+        callback_url: input.callbackUrl,
+        callback_method: input.callbackUrl ? "get" : undefined,
         notes: input.notes,
       }),
     });
