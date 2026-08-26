@@ -65,7 +65,7 @@ export function DemoConsole({
   const [useLiveAI, setUseLiveAI] = useState(false);
   const [result, setResult] = useState<{
     message: string;
-    caseId: string;
+    caseId?: string;
     scenario: string;
     error?: string;
   } | null>(null);
@@ -75,14 +75,35 @@ export function DemoConsole({
 
   const run = async (scenario: string) => {
     setRunning(scenario);
-    const response = await fetch("/api/demo/scenarios", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ scenario, useLiveAI }),
-    });
-    setResult(await response.json());
-    setRunning("");
-    router.refresh();
+    setResult(null);
+    try {
+      const response = await fetch("/api/demo/scenarios", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ scenario, useLiveAI }),
+      });
+      const value = (await response.json()) as {
+        message?: string;
+        caseId?: string;
+        scenario?: string;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(value.error ?? "Scenario could not be completed");
+      }
+      setResult({
+        message: value.message ?? "Scenario completed successfully.",
+        caseId: value.caseId,
+        scenario: value.scenario ?? scenario,
+      });
+      router.refresh();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Scenario could not be completed";
+      setResult({ message, scenario, error: message });
+    } finally {
+      setRunning("");
+    }
   };
 
   const analyze = async () => {
@@ -142,15 +163,29 @@ export function DemoConsole({
         </button>
       </section>
       {result && (
-        <div className={`demo-result ${result.scenario === "provider_failure" ? "failure" : ""}`}>
-          <CheckCircle2 size={18} />
+        <div
+          className={`demo-result ${result.error || result.scenario === "provider_failure" ? "failure" : ""}`}
+        >
+          {result.error ? (
+            <AlertTriangle size={18} />
+          ) : (
+            <CheckCircle2 size={18} />
+          )}
           <div>
-            <b>{result.scenario === "provider_failure" ? "Failure handled safely" : "Scenario completed"}</b>
+            <b>
+              {result.error
+                ? "Scenario failed"
+                : result.scenario === "provider_failure"
+                  ? "Failure handled safely"
+                  : "Scenario completed"}
+            </b>
             <span>{result.message}</span>
           </div>
-          <a href={`/recoveries/${result.caseId}`}>
-            View {result.caseId} <ArrowRight size={14} />
-          </a>
+          {result.caseId && (
+            <a href={`/recoveries/${result.caseId}`}>
+              View {result.caseId} <ArrowRight size={14} />
+            </a>
+          )}
         </div>
       )}
       <div className="scenario-grid">

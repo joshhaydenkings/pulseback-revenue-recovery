@@ -14,7 +14,10 @@ import { PageHeader } from "../../components/page-header";
 import { getRazorpayIntegrationStatus } from "../../services/razorpay-integration-service";
 import { getAIIntegrationStatus } from "../../services/ai-integration-service";
 import { getDatabaseHealthStatus } from "../../services/database-health-service";
-import { razorpayWebhookUrl, siteUrlConfigured } from "../../lib/site-url";
+import {
+  publicSiteUrlConfigured,
+  razorpayWebhookUrl,
+} from "../../lib/site-url";
 
 export default async function Integrations() {
   const [database, razor, ai] = await Promise.all([
@@ -74,7 +77,12 @@ export default async function Integrations() {
             ["Mode", "TEST"],
             ["Provider", connected ? "Razorpay" : "PulseBack Demo Provider"],
             ["Key ID", razor.keyId ?? "Not configured"],
-            ["Public site", siteUrlConfigured() ? "Configured" : "Local fallback"],
+            [
+              "Public site",
+              publicSiteUrlConfigured()
+                ? "Public HTTPS configured"
+                : "Public HTTPS required",
+            ],
             ["Webhook URL", razorpayWebhookUrl()],
             [
               "Webhook",
