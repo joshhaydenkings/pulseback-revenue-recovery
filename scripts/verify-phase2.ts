@@ -24,7 +24,9 @@ assert.equal(await prisma.recoveryAction.count({ where: { recoveryCaseId: failed
 if ((await repository.getCase(failed.caseId!))?.status === 'AWAITING_APPROVAL') {
   await repository.runCaseCommand(failed.caseId!, 'approve');
 }
-const due = await repository.processDueActions(new Date(Date.now() + 1_000));
+const due = await repository.processDueActions(
+  new Date(Date.now() + 24 * 60 * 60 * 1_000),
+);
 assert.ok(due.processed >= 1);
 assert.equal((await repository.getCase(failed.caseId!))?.status, 'RECOVERING');
 const actionCountBeforeDuplicate = await prisma.recoveryAction.count({ where: { recoveryCaseId: failed.caseId } });

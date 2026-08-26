@@ -135,7 +135,7 @@ async function seed() {
         },
       });
     }
-  });
+  }, { maxWait: 10_000, timeout: 30_000 });
 }
 
 seed()

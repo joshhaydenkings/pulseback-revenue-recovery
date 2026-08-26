@@ -944,8 +944,10 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     return result;
   }
 
-  async getDashboard(): Promise<DashboardSnapshot> {
-    const cases = await this.listCases();
+  async getDashboard(
+    prefetchedCases?: RecoveryCase[],
+  ): Promise<DashboardSnapshot> {
+    const cases = prefetchedCases ?? (await this.listCases());
     const recovered = cases.filter((c) =>
       ["RECOVERED", "SELF_RECOVERED"].includes(c.status),
     );

@@ -16,6 +16,14 @@ Copy-Item .env.example .env.local
 
 For local PostgreSQL, set `DATABASE_URL`, `DIRECT_URL`, `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, and `DEMO_MODE=true`. Never prefix database or AI-provider secrets with `NEXT_PUBLIC_`.
 
+If you use Prisma's bundled local PostgreSQL server, start it first and copy the printed TCP connection string into both `DATABASE_URL` and `DIRECT_URL`:
+
+```powershell
+npx prisma dev -d
+```
+
+After the first creation, restart or stop the database with `npm run db:start` and `npm run db:stop`. The local server keeps its assigned ports. If Prisma creates a new server with different ports, update both URLs before migrating.
+
 For Neon/Cloudflare, use its pooled/serverless URL for `DATABASE_URL`, direct URL for `DIRECT_URL`, `DATABASE_DRIVER=neon`, and `DATABASE_RUNTIME=workerd`.
 
 ## 3. Apply migrations and seed

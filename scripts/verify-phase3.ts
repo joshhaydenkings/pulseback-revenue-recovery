@@ -9,6 +9,10 @@ if (!process.env.DATABASE_URL)
 const repository = getRecoveryRepository();
 assert.equal(repository.kind, "postgresql");
 
+// Keep this persistence/provider verification deterministic and credit-free.
+// Live Groq is verified separately through the dedicated AI endpoint.
+process.env.GROQ_API_KEY = "";
+
 const token = process.env.PHASE3_VERIFY_TOKEN ?? `phase3_${Date.now()}`;
 const originalPaymentId = `pay_test_failure_${token}`;
 const recoveryPaymentId = `pay_test_recovery_${token}`;

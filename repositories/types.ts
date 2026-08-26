@@ -120,7 +120,7 @@ export interface RecoveryRepository {
   ): Promise<CaseCommandResult>;
   reanalyzeCase(caseId: string): Promise<CaseCommandResult>;
   processDueActions(now?: Date): Promise<DueActionResult>;
-  getDashboard(): Promise<DashboardSnapshot>;
+  getDashboard(cases?: RecoveryCase[]): Promise<DashboardSnapshot>;
   saveEvaluation(result: EvaluationResult): Promise<EvaluationRunSummary>;
   listEvaluationRuns(limit?: number): Promise<EvaluationRunSummary[]>;
 }
