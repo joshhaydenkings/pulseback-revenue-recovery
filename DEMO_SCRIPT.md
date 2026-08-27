@@ -30,6 +30,16 @@ Refresh the page and show that the case, decisions, actions, and audit remain. R
 
 Open `/lab`, run seed `PULSEBACK-2026`, and identify it as a reproducible synthetic benchmark. Recovery Lab intentionally does not call hosted AI; only the run summary persists.
 
+For an edge-case proof, double-click approval or Run Next Action: one request claims the mutation and the other receives a safe conflict. A stale expiry/cancellation event cannot move a recovered or stopped case back into recovery.
+
+## Pre-demo recovery plan
+
+- If managed PostgreSQL is unavailable, do not claim persistence; switch to the clearly labeled demo fallback and state that it resets on restart.
+- If Groq is unavailable, show the explicit deterministic fallback reason and continue the same Guardian path.
+- If Razorpay Test or the public webhook is unavailable, use the internal simulator and label the Payment Link as simulated.
+- If Resend is unavailable, preview the controlled template and show the mock-provider audit entry; do not claim delivery.
+- To restore local seeded data, stop the app and run `npm run db:reset`. This command refuses non-local databases.
+
 ## Optional Phase 6 email proof
 
 1. Open `/integrations` and show **Resend Connected** or honestly show **Mock Fallback**.

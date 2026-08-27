@@ -1,5 +1,101 @@
-'use client';
-import { useState } from 'react';import { useRouter } from 'next/navigation';import { ArrowRight, Loader2, Radio, Send } from 'lucide-react';
-const events=[['authentication_failure','Payment failed: authentication'],['insufficient_funds','Payment failed: insufficient funds'],['bank_timeout','Payment failed: bank timeout'],['late_authorization','Payment later authorized'],['payment_captured','Payment captured'],['payment_link_paid','Payment Link paid'],['payment_link_error','Payment Link API error'],['repeated_failure','Repeated failure'],['high_value_failure','High-value failure'],['exhausted_contact_limit','Exhausted contact limit']];
-type SimulatedEventResult={message:string;eventId:string;caseId:string};
-export function EventSimulator(){const router=useRouter();const[type,setType]=useState(events[0][0]);const[paymentId,setPaymentId]=useState('pay_demo_1039');const[pending,setPending]=useState(false);const[result,setResult]=useState<SimulatedEventResult>();const send=async()=>{setPending(true);const r=await fetch('/api/demo/events',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type,providerPaymentId:paymentId})});setResult(await r.json() as SimulatedEventResult);setPending(false);router.refresh()};return <div className="simulator-layout"><section className="panel simulator-panel"><div className="simulator-label"><Radio size={14}/> INTERNAL EVENT SIMULATOR</div><h3>Send an event through the recovery pipeline</h3><p>Simulated events use the same typed, persistent event processor as provider webhooks, without signatures or external side effects.</p><label>Event type<select value={type} onChange={e=>setType(e.target.value)}>{events.map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></label><label>External payment ID<input value={paymentId} onChange={e=>setPaymentId(e.target.value)} /></label><button className="primary-button" onClick={send} disabled={pending}>{pending?<Loader2 className="spin" size={15}/>:<Send size={15}/>} Inject simulated event</button></section>{result?<section className="event-output"><span>EVENT ACCEPTED</span><h3>{result.message}</h3><dl><div><dt>Event ID</dt><dd>{result.eventId}</dd></div><div><dt>Recovery case</dt><dd>{result.caseId??'No match'}</dd></div><div><dt>Data source</dt><dd>SIMULATOR</dd></div></dl>{result.caseId&&<a href={`/recoveries/${result.caseId}`}>Inspect recovery case <ArrowRight size={14}/></a>}</section>:<section className="event-empty"><Radio size={28}/><p>Injected event details will appear here.</p></section>}</div>}
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, ArrowRight, Loader2, Radio, Send } from "lucide-react";
+
+const events = [
+  ["authentication_failure", "Payment failed: authentication"],
+  ["insufficient_funds", "Payment failed: insufficient funds"],
+  ["bank_timeout", "Payment failed: bank timeout"],
+  ["late_authorization", "Payment later authorized"],
+  ["payment_captured", "Payment captured"],
+  ["payment_link_paid", "Payment Link paid"],
+  ["payment_link_error", "Payment Link API error"],
+  ["repeated_failure", "Repeated failure"],
+  ["high_value_failure", "High-value failure"],
+  ["exhausted_contact_limit", "Exhausted contact limit"],
+] as const;
+
+type SimulatedEventResult = {
+  message: string;
+  eventId?: string;
+  caseId?: string;
+  error?: string;
+};
+
+export function EventSimulator() {
+  const router = useRouter();
+  const [type, setType] = useState(events[0][0]);
+  const [paymentId, setPaymentId] = useState("pay_demo_1039");
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<SimulatedEventResult>();
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    setPending(true);
+    setError("");
+    setResult(undefined);
+    try {
+      const response = await fetch("/api/demo/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type, providerPaymentId: paymentId.trim() }),
+      });
+      const value = (await response.json()) as SimulatedEventResult;
+      if (!response.ok)
+        throw new Error(value.error ?? "Simulated event could not be processed");
+      setResult(value);
+      router.refresh();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Simulated event could not be processed",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="simulator-layout">
+      <section className="panel simulator-panel">
+        <div className="simulator-label"><Radio size={14} /> INTERNAL EVENT SIMULATOR</div>
+        <h3>Send an event through the recovery pipeline</h3>
+        <p>Simulated events use the same typed, persistent event processor as provider webhooks, without signatures or external side effects.</p>
+        <label>
+          Event type
+          <select value={type} onChange={(event) => setType(event.target.value as typeof type)}>
+            {events.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+          </select>
+        </label>
+        <label>
+          External payment ID
+          <input value={paymentId} onChange={(event) => setPaymentId(event.target.value)} />
+        </label>
+        <button className="primary-button" onClick={send} disabled={pending || !paymentId.trim()}>
+          {pending ? <Loader2 className="spin" size={15} /> : <Send size={15} />}
+          {pending ? "Processing event…" : "Inject simulated event"}
+        </button>
+      </section>
+      {error ? (
+        <section className="event-output action-error" role="alert">
+          <span>EVENT REJECTED</span><h3>{error}</h3><AlertTriangle size={24} />
+        </section>
+      ) : result ? (
+        <section className="event-output" role="status">
+          <span>EVENT ACCEPTED</span><h3>{result.message}</h3>
+          <dl>
+            <div><dt>Event ID</dt><dd>{result.eventId ?? "Unavailable"}</dd></div>
+            <div><dt>Recovery case</dt><dd>{result.caseId ?? "No match"}</dd></div>
+            <div><dt>Data source</dt><dd>SIMULATOR</dd></div>
+          </dl>
+          {result.caseId && <a href={`/recoveries/${result.caseId}`}>Inspect recovery case <ArrowRight size={14} /></a>}
+        </section>
+      ) : (
+        <section className="event-empty"><Radio size={28} /><p>Injected event details will appear here.</p></section>
+      )}
+    </div>
+  );
+}

@@ -224,4 +224,6 @@ The endpoint fails closed when `CRON_SECRET` is missing, re-validates Guardian a
 - API failures return safe client messages. Server diagnostics redact connection strings, authorization values, and provider-key patterns.
 - Security headers are enabled. A Content Security Policy is intentionally not added until it can be nonce-based and fully tested with Razorpay Checkout.
 - Authentication and merchant isolation are intentionally deferred for the hackathon build; rate limiting is not a substitute for authentication.
-- Email, SMS, and WhatsApp remain simulated. A `NotificationProvider` boundary is ready for a real email adapter in the next phase.
+- Email is genuine only when the Integrations page shows **Resend Connected**; otherwise the mock adapter simulates it without external delivery. SMS and WhatsApp remain unconnected.
+- Webhook request bodies larger than 1 MB are rejected. Keep any reverse-proxy limit at or below the same boundary and preserve the raw body for HMAC verification.
+- Use `npm run db:reset` only for the local development database. There is deliberately no public destructive reset endpoint.

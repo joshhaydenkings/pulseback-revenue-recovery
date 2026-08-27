@@ -22,8 +22,8 @@
     "db:seed": "prisma db seed",
     "db:verify": "tsx scripts/verify-database.ts",
     "db:reset": "tsx scripts/reset-development-database.ts",
-    "verify:phase2": "tsx --env-file=.env.local scripts/verify-phase2.ts",
-    "verify:phase3": "tsx --env-file=.env.local scripts/verify-phase3.ts"
+    "verify:phase2": "tsx --conditions=react-server --env-file=.env.local scripts/verify-phase2.ts",
+    "verify:phase3": "tsx --conditions=react-server --env-file=.env.local scripts/verify-phase3.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

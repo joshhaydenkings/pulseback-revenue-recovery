@@ -40,6 +40,8 @@ export function AppShell({
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [modeOpen, setModeOpen] = useState(false);
+  const [modePending, setModePending] = useState(false);
+  const [modeError, setModeError] = useState("");
   const [policies, setPolicies] = useState<
     GuardianPolicies & { storage?: string }
   >();
@@ -76,7 +78,7 @@ export function AppShell({
       .catch(() => undefined);
   }, []);
   const changeMode = async (mode: OperatingMode) => {
-    if (!policies || mode === policies.operatingMode) return;
+    if (!policies || mode === policies.operatingMode || modePending) return;
     if (
       mode === "AUTOPILOT" &&
       !window.confirm(
@@ -86,15 +88,22 @@ export function AppShell({
       return;
     const next = { ...policies, operatingMode: mode };
     delete next.storage;
-    const response = await fetch("/api/policies", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(next),
-    });
-    if (response.ok) {
+    setModePending(true);
+    setModeError("");
+    try {
+      const response = await fetch("/api/policies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!response.ok) throw new Error("Operating mode could not be saved");
       setPolicies({ ...next, storage: policies.storage });
       setModeOpen(false);
       router.refresh();
+    } catch (error) {
+      setModeError(error instanceof Error ? error.message : "Operating mode could not be saved");
+    } finally {
+      setModePending(false);
     }
   };
   return (
@@ -130,12 +139,13 @@ export function AppShell({
           {modeOpen && (
             <div className="mode-menu">
               {(["SHADOW", "APPROVAL", "AUTOPILOT"] as const).map((mode) => (
-                <button key={mode} onClick={() => changeMode(mode)}>
+                <button key={mode} disabled={modePending} onClick={() => changeMode(mode)}>
                   {mode}
                 </button>
               ))}
             </div>
           )}
+          {modeError && <small className="test-error" role="alert">{modeError}</small>}
           <small>
             {policies?.storage === "postgresql"
               ? "PostgreSQL · Guardian protected"
@@ -191,14 +201,19 @@ export function AppShell({
           >
             <Menu size={20} />
           </button>
-          <div className="top-search">
+          <button
+            type="button"
+            className="top-search"
+            aria-label="Open Recovery Queue search"
+            onClick={() => router.push("/recoveries")}
+          >
             <Search size={16} />
             <span>Search case, customer, payment...</span>
             <kbd>⌘ K</kbd>
-          </div>
+          </button>
           <div className="top-actions">
             <span className="demo-badge">TEST / DEMO DATA</span>
-            <button aria-label="Demo tools" className="icon-button">
+            <button aria-label="Open Demo Console" className="icon-button" onClick={() => router.push("/demo")}>
               <Beaker size={17} />
             </button>
             <div className="avatar">AM</div>

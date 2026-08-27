@@ -13,6 +13,9 @@
 | Provide auditability | Append-only AI request/result/fallback, Guardian, action, and provider events |
 | Re-evaluate safely | New decision and pending plan; no automatic financial action |
 | Work without credentials | Deterministic AI fallback, mock provider, and demo repository fallback |
+| Resist concurrent clicks | Optimistic case claims and conditional action claims allow one winner |
+| Preserve terminal outcomes | Stale paid/expired/cancelled/provider-failure events cannot regress terminal cases |
+| Degrade safely | Loading, empty, inline mutation-error, and server retry states remain explicit |
 
 ## Claims to make precisely
 
@@ -34,3 +37,11 @@
 6. Preview a recovery email, send it once, then prove a repeated click is suppressed by database idempotency.
 
 The recovery-email endpoint is not an open relay: the browser supplies only a case ID. Recipient, content, amount, and CTA are reloaded from trusted server state. Do not claim inbox delivery from a Resend API acceptance.
+
+## Known limitations to disclose
+
+- No authentication, merchant onboarding, or tenant isolation; this remains a controlled hackathon deployment.
+- No Razorpay Live Mode and no real-money claim. All genuine Razorpay traffic is Test Mode.
+- Resend acceptance is not the same as inbox delivery; delivery webhooks are not yet modeled.
+- CSP is deferred until a nonce-based policy is tested end to end with Razorpay Checkout.
+- Recovery Lab and the Leak Map are synthetic, reproducible product evidence rather than production performance measurements.

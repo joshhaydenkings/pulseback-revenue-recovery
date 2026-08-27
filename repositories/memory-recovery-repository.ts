@@ -42,6 +42,7 @@ type MemoryAction = {
     | "PENDING"
     | "SCHEDULED"
     | "APPROVED"
+    | "EXECUTING"
     | "SUCCEEDED"
     | "FAILED"
     | "CANCELLED"
@@ -61,6 +62,12 @@ const activeStatuses = new Set([
   "SCHEDULED",
   "ACTION_IN_PROGRESS",
   "RECOVERING",
+]);
+const terminalStatuses = new Set([
+  "RECOVERED",
+  "SELF_RECOVERED",
+  "STOPPED",
+  "FAILED",
 ]);
 
 function cloneCase(value: RecoveryCase): RecoveryCase {
@@ -83,6 +90,8 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
   private policies = { ...DEFAULT_POLICIES };
   private audits: AuditRecord[] = structuredClone(auditEvents);
   private webhookEvents = new Set<string>();
+  private reanalyzingCases = new Set<string>();
+  private sentEmailKeys = new Set<string>();
   private evaluations: EvaluationRunSummary[] = [];
   private actions: MemoryAction[] = demoCases
     .filter((c) => c.currentStrategy !== "OBSERVE" || c.nextActionAt)
@@ -165,11 +174,18 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     }
     this.webhookEvents.add(eventKey);
 
+    const linkAction = input.providerLinkId
+      ? this.actions.find(
+          (action) => action.providerReference === input.providerLinkId,
+        )
+      : undefined;
     const existing = input.caseId
       ? this.cases.find((c) => c.id === input.caseId)
-      : input.providerPaymentId
-        ? this.cases.find((c) => c.paymentId === input.providerPaymentId)
-        : undefined;
+      : linkAction
+        ? this.cases.find((c) => c.id === linkAction.caseId)
+        : input.providerPaymentId
+          ? this.cases.find((c) => c.paymentId === input.providerPaymentId)
+          : undefined;
     if (
       input.type === "late_authorization" ||
       input.type === "payment_captured"
@@ -227,26 +243,57 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
           eventId: input.providerEventId,
           message: "Payment Link event recorded; no recovery case matched.",
         };
-      if (existing.status === "RECOVERED")
+      if (terminalStatuses.has(existing.status)) {
+        this.audit(
+          existing.id,
+          "RECOVERY",
+          existing.status === "RECOVERED"
+            ? "DUPLICATE_RECOVERY_PAYMENT_IGNORED"
+            : "TERMINAL_PAYMENT_EVENT_REVIEW_REQUIRED",
+          input.provider === "RAZORPAY" ? "RAZORPAY" : "SIMULATOR",
+          `Terminal ${existing.status} state was preserved.`,
+          { providerEventId: input.providerEventId },
+        );
         return {
           ok: true,
           duplicate: false,
           eventId: input.providerEventId,
           caseId: existing.id,
           message:
-            "Recovery was already recorded; no amount was counted twice.",
+            existing.status === "RECOVERED"
+              ? "Recovery was already recorded; no amount was counted twice."
+              : `Terminal ${existing.status} state preserved; payment requires manual review.`,
         };
+      }
+      const expectedLink = this.actions.find(
+        (action) =>
+          action.caseId === existing.id &&
+          action.type === "CREATE_PAYMENT_LINK" &&
+          (!input.providerLinkId ||
+            action.providerReference === input.providerLinkId),
+      );
+      const validAssociation =
+        input.provider !== "RAZORPAY" ||
+        Boolean(
+          expectedLink &&
+            input.providerLinkId &&
+            input.providerLinkReference ===
+              `pulseback_recovery_${existing.id}`,
+        );
       if (
-        input.amountPaise !== undefined &&
-        input.amountPaise !== existing.amountPaise
+        !validAssociation ||
+        (input.amountPaise !== undefined &&
+          input.amountPaise !== existing.amountPaise)
       ) {
         this.audit(
           existing.id,
           "SECURITY",
-          "PAYMENT_LINK_AMOUNT_MISMATCH",
+          "PAYMENT_LINK_EVENT_REJECTED",
           "SYSTEM",
-          "Payment Link payment amount did not match the recovery case.",
+          "Payment Link event did not match the expected case, provider link, reference and amount.",
           {
+            providerLinkId: input.providerLinkId,
+            referenceId: input.providerLinkReference,
             expectedAmountPaise: existing.amountPaise,
             receivedAmountPaise: input.amountPaise,
           },
@@ -256,7 +303,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
           duplicate: false,
           eventId: input.providerEventId,
           caseId: existing.id,
-          message: "Payment Link amount mismatch rejected.",
+          message: "Payment Link association or amount mismatch rejected.",
         };
       }
       existing.status = "RECOVERED";
@@ -297,6 +344,23 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
         input.type === "payment_link_cancelled") &&
       existing
     ) {
+      if (terminalStatuses.has(existing.status)) {
+        this.audit(
+          existing.id,
+          "ACTION",
+          "STALE_PAYMENT_LINK_EVENT_IGNORED",
+          "SYSTEM",
+          `Terminal ${existing.status} state was preserved.`,
+          { providerEventId: input.providerEventId },
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          eventId: input.providerEventId,
+          caseId: existing.id,
+          message: `Terminal ${existing.status} state preserved.`,
+        };
+      }
       existing.status =
         existing.attempts >= this.policies.maxAttemptsPerCase
           ? "STOPPED"
@@ -336,6 +400,23 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       };
     }
     if (input.type === "payment_link_error" && existing) {
+      if (terminalStatuses.has(existing.status)) {
+        this.audit(
+          existing.id,
+          "ACTION",
+          "STALE_PROVIDER_FAILURE_IGNORED",
+          "SYSTEM",
+          `Terminal ${existing.status} state was preserved.`,
+          { providerEventId: input.providerEventId },
+        );
+        return {
+          ok: true,
+          duplicate: false,
+          eventId: input.providerEventId,
+          caseId: existing.id,
+          message: `Terminal ${existing.status} state preserved.`,
+        };
+      }
       existing.status = "ESCALATED";
       this.actions
         .filter(
@@ -565,6 +646,13 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     if (!recovery) throw new Error("Recovery case not found");
     if (["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(recovery.status))
       throw new Error("Completed or stopped cases cannot be re-analyzed");
+    if (this.reanalyzingCases.has(caseId))
+      throw new Error("Recovery re-analysis is already in progress");
+    this.reanalyzingCases.add(caseId);
+    const originalStatus = recovery.status;
+    recovery.status = "ANALYZING";
+    let completed = false;
+    try {
     const actions = this.actions.filter((action) => action.caseId === caseId);
     const context = buildRecoveryDecisionContext({
       transaction: {
@@ -587,7 +675,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
         preferredMethod: recovery.memory.preferredMethod,
       },
       recovery: {
-        status: recovery.status,
+        status: originalStatus,
         attempts: recovery.attempts,
         previousActions: actions.map((action) => ({
           type: action.type,
@@ -602,6 +690,8 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
     const analysis = await this.decisionResolver(context, {
       useAI: true,
     });
+    if (recovery.status !== "ANALYZING")
+      throw new Error("Recovery case changed while re-analysis was in progress");
     const decision = {
       ...analysis.decision,
       riskFlags: [
@@ -683,6 +773,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
         fallbackReason: analysis.fallbackReason,
       },
     );
+    completed = true;
     return {
       ok: true,
       case: recovery,
@@ -691,6 +782,11 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
           ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} re-analysis persisted. Guardian evaluated it; no action executed automatically.`
           : "Deterministic fallback re-analysis persisted. No action executed automatically.",
     };
+    } finally {
+      this.reanalyzingCases.delete(caseId);
+      if (!completed && recovery.status === "ANALYZING")
+        recovery.status = originalStatus;
+    }
   }
 
   async runCaseCommand(
@@ -700,6 +796,10 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
   ): Promise<CaseCommandResult> {
     const recovery = this.cases.find((c) => c.id === caseId);
     if (!recovery) throw new Error("Recovery case not found");
+    if (command === "run" && terminalStatuses.has(recovery.status))
+      throw new Error(
+        `No action can run for a terminal ${recovery.status.toLowerCase()} case`,
+      );
     const pending = this.actions.find(
       (a) =>
         a.caseId === caseId &&
@@ -748,8 +848,8 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       };
     }
     if (command === "escalate") {
-      if (["RECOVERED", "SELF_RECOVERED"].includes(recovery.status))
-        throw new Error("Recovered cases cannot be escalated");
+      if (terminalStatuses.has(recovery.status))
+        throw new Error("Completed or stopped cases cannot be escalated");
       recovery.status = "ESCALATED";
       recovery.nextActionAt = undefined;
       this.timeline(
@@ -871,6 +971,7 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
         };
       }
       if (pending.type === "SEND_EMAIL_REMINDER") {
+        pending.status = "EXECUTING";
         const paymentLinkUrl =
           recovery.activePaymentLinkUrl ??
           `https://rzp.io/i/demo-${recovery.id}`;
@@ -879,12 +980,18 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
           amountPaise: recovery.amountPaise,
           paymentLinkUrl,
         });
-        const delivery = await resolveNotificationProvider().sendEmail({
-          to: recovery.customerEmail,
-          ...rendered,
-          idempotencyKey: `demo:${recovery.id}:recovery-email-v1`,
-        });
-        pending.providerReference = delivery.id;
+        try {
+          const delivery = await resolveNotificationProvider().sendEmail({
+            to: recovery.customerEmail,
+            ...rendered,
+            idempotencyKey: `demo:${recovery.id}:recovery-email-v1`,
+          });
+          pending.providerReference = delivery.id;
+        } catch (error) {
+          pending.status = "FAILED";
+          recovery.status = "ESCALATED";
+          throw error;
+        }
       }
       pending.status = "SUCCEEDED";
       recovery.attempts += 1;
@@ -1009,8 +1116,14 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       return { ok: true as const, status: "SUPPRESSED" as const, provider: "mock" as const, message: preview.blockedReasons.join(" · ") };
     }
     const recovery = this.cases.find((item) => item.id === caseId)!;
+    const emailKey = `demo:${caseId}:${recovery.activePaymentLinkId}:recovery-email-v1`;
+    if (this.sentEmailKeys.has(emailKey)) {
+      this.audit(caseId, "NOTIFICATION", "DUPLICATE_RECOVERY_EMAIL_IGNORED", "SYSTEM", "Duplicate recovery email request ignored.", { idempotencyKey: emailKey });
+      return { ok: true as const, status: "DUPLICATE" as const, provider: "mock" as const, message: "Recovery email was already simulated; no duplicate was created." };
+    }
+    this.sentEmailKeys.add(emailKey);
     const rendered = renderRecoveryEmail({ customerName: recovery.customerName, amountPaise: recovery.amountPaise, paymentLinkUrl: preview.paymentLinkUrl });
-    const delivery = await resolveNotificationProvider().sendEmail({ to: recovery.customerEmail, ...rendered, idempotencyKey: `demo:${caseId}:recovery-email-v1` });
+    const delivery = await resolveNotificationProvider().sendEmail({ to: recovery.customerEmail, ...rendered, idempotencyKey: emailKey });
     this.audit(caseId, "NOTIFICATION", "RECOVERY_EMAIL_SIMULATED", "SYSTEM", "Recovery email was simulated; no message left PulseBack.", { providerMessageId: delivery.id, recipient: maskEmail(recovery.customerEmail) });
     return { ok: true as const, status: "SIMULATED" as const, provider: "mock" as const, providerMessageId: delivery.id, message: "Recovery email was simulated. No external message was sent." };
   }

@@ -116,7 +116,7 @@ export default async function RecoveryDetail({
             {c.paymentMethod}
             <i />
             <Clock3 size={14} />
-            Failed Aug 25, 10:02 AM
+            Failed {new Date(c.createdAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
           </p>
         </div>
         <CaseActions status={c.status} caseId={c.id} />
@@ -199,7 +199,7 @@ export default async function RecoveryDetail({
               />
               <Data label="Gateway status" value="FAILED" danger />
               <Data label="Payment method" value={c.paymentMethod} />
-              <Data label="Recovery attempts" value={`${c.attempts} of 3`} />
+              <Data label="Recovery attempts" value={`${c.attempts} of ${policies.maxAttemptsPerCase}`} />
               <Data
                 label="Previous successes"
                 value={String(c.memory.successfulPayments)}
@@ -349,6 +349,7 @@ export default async function RecoveryDetail({
           </section>
           <CustomerCommunication
             caseId={c.id}
+            status={c.status}
             hasPaymentLink={Boolean(c.activePaymentLinkId && c.activePaymentLinkUrl)}
           />
           <section className="panel timeline-panel">

@@ -112,6 +112,10 @@ The Prisma client is cached per runtime instance to avoid needless connection po
 - The Razorpay webhook keeps raw-body HMAC verification and database idempotency; it is not blocked by arbitrary request throttling.
 - Security headers include MIME sniffing protection, a strict referrer policy, same-origin frame protection, a restrictive permissions policy, and HSTS on configured HTTPS builds. A CSP is intentionally deferred because an incomplete policy could break Razorpay Checkout.
 - `CRON_SECRET` is mandatory for `/api/cron/recovery`. The UI's clearly labeled demo control uses a separate rate-limited demo endpoint.
+- Provider events larger than 1 MB are rejected before signature/configuration work. Malformed and unsigned Razorpay payloads never enter the recovery pipeline.
+- Case approval, re-analysis, action execution, Payment Link creation, and notification delivery use atomic claims or unique idempotency keys to reject concurrent duplicates.
+- Terminal `RECOVERED`, `SELF_RECOVERED`, `STOPPED`, and `FAILED` cases cannot be restarted by stale provider events or case commands.
+- Server-rendered failures show a safe retry screen; route navigation has a meaningful loading state. Expected mutation failures remain inline and do not expose provider or database diagnostics.
 
 ## Verification
 
@@ -144,10 +148,12 @@ Tests use injected fake provider response boundaries; they never consume API cre
 
 ## Still simulated or deferred
 
-- Real email, SMS, and WhatsApp delivery
+- Email delivery is real only when the Integrations page shows **Resend Connected**; otherwise it is explicitly simulated. SMS and WhatsApp are not connected.
 - Live Razorpay credentials and real money movement
 - Authentication, merchant onboarding, and multi-tenant isolation
 - Seeded demo cases and Recovery Lab inputs are synthetic
 - Hosted AI is optional and falls back safely when unavailable
+- A Content Security Policy remains deferred until a nonce-based Razorpay Checkout policy is fully tested.
+- Public deployment requires separately configured host secrets and managed PostgreSQL; repository verification cannot prove third-party account approval or inbox delivery.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md), [DEMO_SCRIPT.md](./DEMO_SCRIPT.md), and [JUDGING_NOTES.md](./JUDGING_NOTES.md).

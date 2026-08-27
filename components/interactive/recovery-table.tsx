@@ -44,6 +44,7 @@ export function RecoveryTable({ cases }: { cases: RecoveryCase[] }) {
         <label>
           <Search size={15} />
           <input
+            aria-label="Search recovery cases"
             placeholder="Search customer, case or payment ID"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -52,6 +53,7 @@ export function RecoveryTable({ cases }: { cases: RecoveryCase[] }) {
         <div className="filter-select">
           <Filter size={14} />
           <select
+            aria-label="Filter recovery cases by status"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
           >
@@ -66,6 +68,7 @@ export function RecoveryTable({ cases }: { cases: RecoveryCase[] }) {
         </div>
         <div className="filter-select">
           <select
+            aria-label="Filter recovery cases by failure category"
             value={category}
             onChange={(event) => setCategory(event.target.value)}
           >
@@ -153,7 +156,11 @@ export function RecoveryTable({ cases }: { cases: RecoveryCase[] }) {
         ))}
       </div>
       {!rows.length && (
-        <div className="empty-state">No recovery cases match these filters.</div>
+        <div className="empty-state">
+          {cases.length
+            ? "No recovery cases match these filters."
+            : "No recovery cases yet. Run a demo scenario or receive a provider event to create one."}
+        </div>
       )}
     </section>
   );

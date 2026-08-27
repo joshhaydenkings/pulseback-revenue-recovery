@@ -6,7 +6,6 @@ import {
   Check,
   ExternalLink,
   Loader2,
-  MoreHorizontal,
   Play,
   RefreshCcw,
   ShieldAlert,
@@ -77,7 +76,7 @@ export function CaseActions({ status, caseId }: { status: string; caseId: string
     }
   };
 
-  const terminal = ["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(status);
+  const terminal = ["RECOVERED", "SELF_RECOVERED", "STOPPED", "FAILED"].includes(status);
   return (
     <>
       <div className="case-actions">
@@ -157,17 +156,14 @@ export function CaseActions({ status, caseId }: { status: string; caseId: string
             <ShieldAlert size={15} />
           </button>
         )}
-        <button aria-label="More actions" className="secondary-button square">
-          <MoreHorizontal size={15} />
-        </button>
       </div>
       {notice && (
-        <div className="action-toast">
+        <div className="action-toast" role="status" aria-live="polite">
           <Check size={14} /> {notice}
         </div>
       )}
       {error && (
-        <div className="action-toast action-error">
+        <div className="action-toast action-error" role="alert">
           <ShieldX size={14} /> {error}
         </div>
       )}

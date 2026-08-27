@@ -54,7 +54,7 @@ export default async function Integrations() {
             ["Connection", database.status === "connected" ? "Connected" : database.status === "demo" ? "Demo fallback" : "Unavailable"],
             ["Driver", database.driver === "neon" ? "Neon serverless" : "PostgreSQL TCP"],
             ["Runtime", database.runtime],
-            ["Last recovery", database.lastRecoveryAt ? new Date(database.lastRecoveryAt).toLocaleString("en-IN") : "â€”"],
+            ["Last recovery", database.lastRecoveryAt ? new Date(database.lastRecoveryAt).toLocaleString("en-IN") : "—"],
           ]}
           env={["DATABASE_URL", "DIRECT_URL", "DATABASE_DRIVER", "DATABASE_RUNTIME"]}
         />
@@ -103,7 +103,7 @@ export default async function Integrations() {
             ["Orders created", String(razor.ordersCreated)],
             ["Recovery links created", String(razor.recoveryLinksCreated)],
             ["Successful Test recoveries", String(razor.successfulRecoveries)],
-            ["Last Test recovery", razor.lastRecoveryAt ? new Date(razor.lastRecoveryAt).toLocaleString("en-IN") : "â€”"],
+            ["Last Test recovery", razor.lastRecoveryAt ? new Date(razor.lastRecoveryAt).toLocaleString("en-IN") : "—"],
           ]}
           env={[
             "NEXT_PUBLIC_RAZORPAY_KEY_ID",

@@ -240,12 +240,17 @@ describe("Razorpay recovery semantics", () => {
       amountPaise: 499_900,
     });
     expect(created.caseId).toBeTruthy();
+    await repository.runCaseCommand(created.caseId!, "run");
+    const linked = await repository.getCase(created.caseId!);
+    expect(linked?.activePaymentLinkId).toBeTruthy();
     const mismatch = await repository.processEvent({
       provider: "RAZORPAY",
       providerEventId: "evt_wrong_amount",
       type: "payment_link_paid",
       caseId: created.caseId,
       providerPaymentId: "pay_wrong",
+      providerLinkId: linked!.activePaymentLinkId,
+      providerLinkReference: `pulseback_recovery_${created.caseId}`,
       amountPaise: 99,
     });
     expect(mismatch.message).toContain("mismatch");
@@ -258,6 +263,8 @@ describe("Razorpay recovery semantics", () => {
       type: "payment_link_paid",
       caseId: created.caseId,
       providerPaymentId: "pay_recovery_once",
+      providerLinkId: linked!.activePaymentLinkId,
+      providerLinkReference: `pulseback_recovery_${created.caseId}`,
       amountPaise: 499_900,
     });
     expect(paid.message).toContain("RECOVERED");
@@ -267,6 +274,8 @@ describe("Razorpay recovery semantics", () => {
       type: "payment_link_paid",
       caseId: created.caseId,
       providerPaymentId: "pay_recovery_once",
+      providerLinkId: linked!.activePaymentLinkId,
+      providerLinkReference: `pulseback_recovery_${created.caseId}`,
       amountPaise: 499_900,
     });
     expect(duplicate.duplicate).toBe(true);
@@ -276,6 +285,8 @@ describe("Razorpay recovery semantics", () => {
       type: "payment_link_paid",
       caseId: created.caseId,
       providerPaymentId: "pay_recovery_once",
+      providerLinkId: linked!.activePaymentLinkId,
+      providerLinkReference: `pulseback_recovery_${created.caseId}`,
       amountPaise: 499_900,
     });
     expect(replayWithNewEventId.message).toContain("already recorded");

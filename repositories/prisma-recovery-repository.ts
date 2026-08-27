@@ -50,6 +50,12 @@ const activeStatuses = new Set([
   "ACTION_IN_PROGRESS",
   "RECOVERING",
 ]);
+const terminalStatuses = new Set([
+  "RECOVERED",
+  "SELF_RECOVERED",
+  "STOPPED",
+  "FAILED",
+]);
 const caseInclude = {
   customer: true,
   payment: true,
@@ -523,6 +529,36 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
                 "Payment Link event rejected because its association or amount did not match.",
             };
           }
+          if (terminalStatuses.has(existing.status)) {
+            await this.createAudit(
+              tx,
+              existing.id,
+              "RECOVERY",
+              existing.status === "RECOVERED"
+                ? "DUPLICATE_RECOVERY_PAYMENT_IGNORED"
+                : "TERMINAL_PAYMENT_EVENT_REVIEW_REQUIRED",
+              input.provider === "RAZORPAY" ? "RAZORPAY" : "SIMULATOR",
+              existing.status === "RECOVERED"
+                ? "A later payment event matched an already recovered case; revenue was not counted twice."
+                : `A payment event matched a terminal ${existing.status} case. The terminal state was preserved for manual review.`,
+              {
+                providerLinkId: input.providerLinkId,
+                providerPaymentId: input.providerPaymentId,
+                preservedStatus: existing.status,
+              },
+            );
+            await markProcessed();
+            return {
+              ok: true,
+              duplicate: false,
+              eventId: input.providerEventId,
+              caseId: existing.id,
+              message:
+                existing.status === "RECOVERED"
+                  ? "Recovery was already recorded; no amount was counted twice."
+                  : `Terminal ${existing.status} state preserved; payment requires manual review.`,
+            };
+          }
           if (existing.status !== "RECOVERED") {
             if (input.providerPaymentId)
               await tx.payment.upsert({
@@ -615,6 +651,25 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
             input.type === "payment_link_cancelled") &&
           existing
         ) {
+          if (terminalStatuses.has(existing.status)) {
+            await this.createAudit(
+              tx,
+              existing.id,
+              "ACTION",
+              "STALE_PAYMENT_LINK_EVENT_IGNORED",
+              input.provider === "RAZORPAY" ? "RAZORPAY" : "SIMULATOR",
+              `A stale ${input.type.replaceAll("_", " ")} event was recorded without changing terminal case state ${existing.status}.`,
+              { providerLinkId: input.providerLinkId },
+            );
+            await markProcessed();
+            return {
+              ok: true,
+              duplicate: false,
+              eventId: input.providerEventId,
+              caseId: existing.id,
+              message: `Terminal ${existing.status} state preserved.`,
+            };
+          }
           const policies = await this.getPoliciesInTransaction(tx);
           const stopped = existing.attempts >= policies.maxAttemptsPerCase;
           await tx.recoveryAction.updateMany({
@@ -659,6 +714,25 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           };
         }
         if (input.type === "payment_link_error" && existing) {
+          if (terminalStatuses.has(existing.status)) {
+            await this.createAudit(
+              tx,
+              existing.id,
+              "ACTION",
+              "STALE_PROVIDER_FAILURE_IGNORED",
+              "SYSTEM",
+              `A provider failure arrived after the case reached ${existing.status}; no state changed.`,
+              { simulated: input.provider !== "RAZORPAY" },
+            );
+            await markProcessed();
+            return {
+              ok: true,
+              duplicate: false,
+              eventId: input.providerEventId,
+              caseId: existing.id,
+              message: `Terminal ${existing.status} state preserved.`,
+            };
+          }
           await tx.recoveryAction.updateMany({
             where: {
               recoveryCaseId: existing.id,
@@ -1080,6 +1154,20 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
     if (["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(recovery.status))
       throw new Error("Completed or stopped cases cannot be re-analyzed");
 
+    const claimed = await prisma.recoveryCase.updateMany({
+      where: {
+        id: caseId,
+        status: recovery.status,
+        updatedAt: recovery.updatedAt,
+      },
+      data: { status: "ANALYZING" },
+    });
+    if (claimed.count !== 1)
+      throw new Error("Recovery case changed while re-analysis was starting");
+    const originalStatus = recovery.status;
+    let completed = false;
+    try {
+
     const policies = await this.getPolicies();
     const domain = toDomain(recovery);
     const now = new Date();
@@ -1181,8 +1269,8 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           errorMessage: "Superseded by merchant-requested re-analysis.",
         },
       });
-      await tx.recoveryCase.update({
-        where: { id: caseId },
+      const finalized = await tx.recoveryCase.updateMany({
+        where: { id: caseId, status: "ANALYZING" },
         data: {
           status,
           failureCategory: decision.failureCategory,
@@ -1194,6 +1282,10 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           nextActionAt: null,
         },
       });
+      if (finalized.count !== 1)
+        throw new Error(
+          "Recovery case changed while re-analysis was in progress",
+        );
       await tx.recoveryDecision.create({
         data: {
           id: crypto.randomUUID(),
@@ -1272,6 +1364,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
 
     const updated = await this.getCase(caseId);
     if (!updated) throw new Error("Recovery case disappeared after re-analysis");
+    completed = true;
     return {
       ok: true,
       case: updated,
@@ -1280,6 +1373,14 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
           ? `${analysis.provider === "GROQ" ? "Groq" : "OpenAI"} re-analysis persisted. Guardian evaluated it; no action executed automatically.`
           : "Deterministic fallback re-analysis persisted. No action executed automatically.",
     };
+    } finally {
+      if (!completed) {
+        await prisma.recoveryCase.updateMany({
+          where: { id: caseId, status: "ANALYZING" },
+          data: { status: originalStatus },
+        });
+      }
+    }
   }
 
   async runCaseCommand(
@@ -1300,11 +1401,21 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       );
       if (command === "stop" || command === "reject") {
         if (
-          ["RECOVERED", "SELF_RECOVERED", "STOPPED"].includes(recovery.status)
+          terminalStatuses.has(recovery.status)
         )
           throw new Error(
             `Cannot ${command} a ${recovery.status.toLowerCase()} case`,
           );
+        const stopped = await tx.recoveryCase.updateMany({
+          where: {
+            id: caseId,
+            status: recovery.status,
+            updatedAt: recovery.updatedAt,
+          },
+          data: { status: "STOPPED", nextActionAt: null },
+        });
+        if (stopped.count !== 1)
+          throw new Error("Recovery case was already updated by another request");
         await tx.recoveryAction.updateMany({
           where: {
             recoveryCaseId: caseId,
@@ -1314,10 +1425,6 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
             status: command === "reject" ? "REJECTED" : "CANCELLED",
             errorMessage: reason ?? "Merchant stopped recovery.",
           },
-        });
-        await tx.recoveryCase.update({
-          where: { id: caseId },
-          data: { status: "STOPPED", nextActionAt: null },
         });
         await this.createAudit(
           tx,
@@ -1336,12 +1443,18 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
         };
       }
       if (command === "escalate") {
-        if (["RECOVERED", "SELF_RECOVERED"].includes(recovery.status))
-          throw new Error("Recovered cases cannot be escalated");
-        await tx.recoveryCase.update({
-          where: { id: caseId },
+        if (terminalStatuses.has(recovery.status))
+          throw new Error("Completed or stopped cases cannot be escalated");
+        const escalated = await tx.recoveryCase.updateMany({
+          where: {
+            id: caseId,
+            status: recovery.status,
+            updatedAt: recovery.updatedAt,
+          },
           data: { status: "ESCALATED", nextActionAt: null },
         });
+        if (escalated.count !== 1)
+          throw new Error("Recovery case was already updated by another request");
         await this.createAudit(
           tx,
           caseId,
@@ -1357,14 +1470,25 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
         if (recovery.status !== "AWAITING_APPROVAL" || !pending)
           throw new Error("This case is not awaiting approval");
         const scheduledFor = new Date();
-        await tx.recoveryAction.update({
-          where: { id: pending.id },
-          data: { status: "SCHEDULED", scheduledFor },
-        });
-        await tx.recoveryCase.update({
-          where: { id: caseId },
+        const approvedCase = await tx.recoveryCase.updateMany({
+          where: {
+            id: caseId,
+            status: "AWAITING_APPROVAL",
+            updatedAt: recovery.updatedAt,
+          },
           data: { status: "SCHEDULED", nextActionAt: scheduledFor },
         });
+        if (approvedCase.count !== 1)
+          throw new Error("Recovery case was already approved or updated");
+        const approvedAction = await tx.recoveryAction.updateMany({
+          where: {
+            id: pending.id,
+            status: { in: ["PENDING", "APPROVED"] },
+          },
+          data: { status: "SCHEDULED", scheduledFor },
+        });
+        if (approvedAction.count !== 1)
+          throw new Error("Recovery action was already approved or updated");
         await this.createAudit(
           tx,
           caseId,
@@ -1521,6 +1645,10 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
         include: caseInclude,
       });
       if (!recovery) throw new Error("Recovery case not found");
+      if (terminalStatuses.has(recovery.status))
+        throw new Error(
+          `No action can run for a terminal ${recovery.status.toLowerCase()} case`,
+        );
       const activeLink = recovery.actions.find(
         (action) =>
           action.type === "CREATE_PAYMENT_LINK" &&
@@ -1593,14 +1721,19 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
         return { notification: true as const, recovery, action: pending };
       }
       if (pending.type !== "CREATE_PAYMENT_LINK") {
-        await tx.recoveryAction.update({
-          where: { id: pending.id },
+        const claimed = await tx.recoveryAction.updateMany({
+          where: {
+            id: pending.id,
+            status: { in: ["PENDING", "SCHEDULED", "APPROVED"] },
+          },
           data: {
             status: "SUCCEEDED",
             executedAt: new Date(),
             providerStatus: "simulated",
           },
         });
+        if (claimed.count !== 1)
+          throw new Error("Action execution is already in progress");
         await tx.recoveryCase.update({
           where: { id: caseId },
           data: {

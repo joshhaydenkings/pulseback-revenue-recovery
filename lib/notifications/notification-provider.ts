@@ -1,5 +1,7 @@
 import "server-only";
 
+const NOTIFICATION_TIMEOUT_MS = 5_000;
+
 export interface EmailMessage {
   to: string;
   subject: string;
@@ -69,6 +71,7 @@ export class ResendNotificationProvider implements NotificationProvider {
   async sendEmail(input: EmailMessage): Promise<NotificationDelivery> {
     const response = await this.fetcher("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(NOTIFICATION_TIMEOUT_MS),
       headers: {
         authorization: `Bearer ${this.apiKey}`,
         "content-type": "application/json",
