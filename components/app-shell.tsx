@@ -43,18 +43,34 @@ export function AppShell({
   const [policies, setPolicies] = useState<
     GuardianPolicies & { storage?: string }
   >();
-  const [activeCount, setActiveCount] = useState(18);
+  const [activeCount, setActiveCount] = useState<number>();
+  const [aiStatus, setAIStatus] = useState({
+    label: "Checking",
+    connected: false,
+  });
   useEffect(() => {
     void Promise.all([
       fetch("/api/policies").then((r) => r.json()),
       fetch("/api/dashboard").then((r) => r.json()),
+      fetch("/api/health").then((r) => r.json()),
     ])
-      .then(([policy, dashboard]) => {
+      .then(([policy, dashboard, health]) => {
         setPolicies(policy as GuardianPolicies & { storage?: string });
-        setActiveCount(
-          Number(
-            (dashboard as { activeRecoveries?: number }).activeRecoveries ?? 18,
-          ),
+        const count = Number(
+          (dashboard as { activeRecoveries?: number }).activeRecoveries,
+        );
+        if (Number.isFinite(count)) setActiveCount(count);
+        const ai = (
+          health as {
+            ai?: { provider?: string; status?: string };
+          }
+        ).ai;
+        setAIStatus(
+          ai?.status === "connected"
+            ? { label: `${ai.provider ?? "AI"} connected`, connected: true }
+            : ai?.status === "degraded"
+              ? { label: `${ai.provider ?? "AI"} degraded`, connected: false }
+              : { label: "Rules fallback", connected: false },
         );
       })
       .catch(() => undefined);
@@ -135,7 +151,7 @@ export function AppShell({
             >
               <Icon size={18} />
               <span>{label}</span>
-              {label === "Recovery Queue" && <em>{activeCount}</em>}
+              {label === "Recovery Queue" && <em>{activeCount ?? "—"}</em>}
             </a>
           ))}
         </nav>
@@ -153,7 +169,8 @@ export function AppShell({
               <i className="ok" /> Razorpay <b>Test / Demo</b>
             </span>
             <span>
-              <i className="warn" /> AI <b>Rules fallback</b>
+              <i className={aiStatus.connected ? "ok" : "warn"} /> AI{" "}
+              <b>{aiStatus.label}</b>
             </span>
           </div>
         </div>
