@@ -6,6 +6,7 @@
 - PostgreSQL 15+
 - Optional Groq API key for live AI recommendations (OpenAI is also supported)
 - Optional Razorpay account in Test Mode and public HTTPS URL for webhooks
+- Optional Resend account and verified sender domain for real recovery email
 
 ## 2. Install and configure
 
@@ -71,7 +72,21 @@ The key IDs must match. PulseBack rejects live keys. Set the Test webhook URL to
 
 Use the same secret in Razorpay and `RAZORPAY_WEBHOOK_SECRET`. Do not commit tunnel tokens or credentials.
 
-## 6. Run in VS Code
+## 6. Configure recovery email (optional)
+
+Create a Resend API key and verify the sending domain/address in Resend. Then set only server-side values in `.env.local`:
+
+```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=
+EMAIL_FROM_ADDRESS=
+EMAIL_FROM_NAME=PulseBack Recovery
+EMAIL_TEST_RECIPIENT=
+```
+
+`EMAIL_TEST_RECIPIENT` is the only destination used by the Integrations test button; the UI cannot provide an arbitrary recipient. Restart the app, open `/integrations`, and confirm **RESEND CONNECTED**. First use **Send fixed test email**, then create a Test Payment Link on a recovery case, preview the controlled email, and send it. Provider acceptance means sent, not delivered. If configuration is missing, PulseBack stays in mock mode and no message leaves the application.
+
+## 7. Run in VS Code
 
 ```powershell
 npm run dev:postgres
@@ -81,7 +96,7 @@ Open `http://localhost:3000`. Use `npm run dev` only for the Worker-compatible d
 
 `npm run db:start` starts only the bundled local Prisma PostgreSQL server. A hosted application never runs it; it connects directly to managed PostgreSQL through `DATABASE_URL`.
 
-## 7. Test AI safely
+## 8. Test AI safely
 
 1. Open `/integrations`; verify the displayed provider, model, and connection state.
 2. Open `/demo` and enable **Use Live AI** only when configured.
@@ -91,7 +106,7 @@ Open `http://localhost:3000`. Use `npm run dev` only for the Worker-compatible d
 
 The automated tests mock the API boundary and never use provider credits.
 
-## 8. Verification
+## 9. Verification
 
 ```powershell
 npm run lint
@@ -104,18 +119,20 @@ npm run build
 npm audit --omit=dev
 ```
 
-## 9. Fallback states
+## 10. Fallback states
 
 - Hosted AI unavailable: deterministic recommendation with `NOT_CONFIGURED`, `TIMEOUT`, `RATE_LIMIT`, `INVALID_RESPONSE`, or `API_ERROR`.
 - Razorpay Test unavailable: mock payment provider.
 - Database unavailable and `DEMO_MODE=true`: in-memory repository; server restart resets that fallback state.
+- Resend unavailable or incomplete: explicit mock/simulated notification adapter.
 
-## 10. Still mocked
+## 11. Still mocked
 
-- Email/SMS/WhatsApp execution
+- SMS/WhatsApp execution
+- Email when `EMAIL_PROVIDER=resend` is not fully configured
 - Live Razorpay and live money movement
 - Seed/demo data and Recovery Lab cases
 
-## 11. Hosted deployment
+## 12. Hosted deployment
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for managed PostgreSQL, public HTTPS, Razorpay Test webhook, Groq, cron, and the final judge workflow.

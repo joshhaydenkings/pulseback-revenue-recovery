@@ -117,9 +117,17 @@ async function seed() {
               type: recovery.currentStrategy,
               status: recovery.status === 'RECOVERED' ? 'SUCCEEDED' : recovery.status === 'STOPPED' ? 'CANCELLED' : recovery.status === 'ESCALATED' ? 'FAILED' : recovery.status === 'AWAITING_APPROVAL' ? 'PENDING' : recovery.status === 'RECOVERING' ? 'SUCCEEDED' : 'SCHEDULED',
               providerReference: recovery.activePaymentLinkId,
+              providerUrl: recovery.activePaymentLinkId
+                ? `https://rzp.io/i/demo-${recovery.id}`
+                : null,
+              providerStatus: recovery.activePaymentLinkId ? 'created' : null,
               scheduledFor: recovery.nextActionAt ? new Date(recovery.nextActionAt) : null,
               executedAt: ['RECOVERED', 'RECOVERING', 'ESCALATED'].includes(recovery.status) ? new Date(recovery.timeline.at(-1)?.time ?? recovery.createdAt) : null,
-              metadata: { synthetic: true, source: 'DEMO_SEED' },
+              metadata: {
+                synthetic: true,
+                source: 'DEMO_SEED',
+                amountPaise: recovery.amountPaise,
+              },
             },
           } : undefined,
         },

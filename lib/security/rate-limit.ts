@@ -35,6 +35,8 @@ export const publicMutationLimits = {
   demoAI: { scope: 'demo-ai', limit: 6, windowMs: 60_000 },
   recoveryAction: { scope: 'recovery-action', limit: 30, windowMs: 60_000 },
   recoveryReanalysis: { scope: 'recovery-reanalysis', limit: 8, windowMs: 60_000 },
+  recoveryEmail: { scope: 'recovery-email', limit: 5, windowMs: 60_000 },
+  notificationTest: { scope: 'notification-test', limit: 3, windowMs: 60_000 },
   razorpayOrder: { scope: 'razorpay-order', limit: 10, windowMs: 60_000 },
   razorpayVerify: { scope: 'razorpay-verify', limit: 20, windowMs: 60_000 },
   policyMutation: { scope: 'policy-mutation', limit: 10, windowMs: 60_000 },

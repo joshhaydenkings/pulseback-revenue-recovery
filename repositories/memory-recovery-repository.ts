@@ -1,5 +1,9 @@
 import type { EvaluationResult } from "../domain/evaluation/simulator";
 import { resolveNotificationProvider } from "../lib/notifications/notification-provider";
+import {
+  maskEmail,
+  renderRecoveryEmail,
+} from "../lib/notifications/recovery-email-template";
 import type {
   CustomerMemory,
   GuardianPolicies,
@@ -798,7 +802,10 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       };
     }
     if (command === "run") {
-      if (recovery.activePaymentLinkId) {
+      if (
+        recovery.activePaymentLinkId &&
+        (!pending || pending.type === "CREATE_PAYMENT_LINK")
+      ) {
         return {
           ok: true,
           case: cloneCase(recovery),
@@ -864,14 +871,18 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
         };
       }
       if (pending.type === "SEND_EMAIL_REMINDER") {
-        const delivery = await resolveNotificationProvider().sendRecoveryEmail({
-          recoveryCaseId: recovery.id,
-          customer: {
-            name: recovery.customerName,
-            email: recovery.customerEmail,
-          },
+        const paymentLinkUrl =
+          recovery.activePaymentLinkUrl ??
+          `https://rzp.io/i/demo-${recovery.id}`;
+        const rendered = renderRecoveryEmail({
+          customerName: recovery.customerName,
           amountPaise: recovery.amountPaise,
-          paymentLinkUrl: recovery.activePaymentLinkUrl,
+          paymentLinkUrl,
+        });
+        const delivery = await resolveNotificationProvider().sendEmail({
+          to: recovery.customerEmail,
+          ...rendered,
+          idempotencyKey: `demo:${recovery.id}:recovery-email-v1`,
         });
         pending.providerReference = delivery.id;
       }
@@ -955,6 +966,53 @@ export class MemoryRecoveryRepository implements RecoveryRepository {
       }
     }
     return result;
+  }
+
+  async getRecoveryEmailPreview(caseId: string) {
+    const recovery = this.cases.find((item) => item.id === caseId);
+    if (!recovery) throw new Error("Recovery case not found");
+    const paymentLinkUrl =
+      recovery.activePaymentLinkUrl ??
+      (recovery.activePaymentLinkId
+        ? `https://rzp.io/i/demo-${recovery.id}`
+        : undefined);
+    if (!paymentLinkUrl)
+      throw new Error("Create a persisted Razorpay Payment Link before previewing email");
+    const rendered = renderRecoveryEmail({
+      customerName: recovery.customerName,
+      amountPaise: recovery.amountPaise,
+      paymentLinkUrl,
+    });
+    const terminal = ["RECOVERED", "SELF_RECOVERED", "STOPPED", "FAILED"].includes(recovery.status);
+    const blockedReasons = [
+      ...(terminal ? [`Case is ${recovery.status.toLowerCase()}`] : []),
+      ...(this.policies.operatingMode === "SHADOW" ? ["Shadow mode prevents customer contact"] : []),
+    ];
+    return {
+      caseId,
+      recipient: maskEmail(recovery.customerEmail),
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      paymentLinkUrl,
+      amountPaise: recovery.amountPaise,
+      provider: "mock" as const,
+      canSend: blockedReasons.length === 0,
+      blockedReasons,
+    };
+  }
+
+  async sendRecoveryEmail(caseId: string) {
+    const preview = await this.getRecoveryEmailPreview(caseId);
+    if (!preview.canSend) {
+      this.audit(caseId, "NOTIFICATION", "RECOVERY_EMAIL_SUPPRESSED", "GUARDIAN", "Recovery email was suppressed by pre-send safety checks.", { reasons: preview.blockedReasons });
+      return { ok: true as const, status: "SUPPRESSED" as const, provider: "mock" as const, message: preview.blockedReasons.join(" · ") };
+    }
+    const recovery = this.cases.find((item) => item.id === caseId)!;
+    const rendered = renderRecoveryEmail({ customerName: recovery.customerName, amountPaise: recovery.amountPaise, paymentLinkUrl: preview.paymentLinkUrl });
+    const delivery = await resolveNotificationProvider().sendEmail({ to: recovery.customerEmail, ...rendered, idempotencyKey: `demo:${caseId}:recovery-email-v1` });
+    this.audit(caseId, "NOTIFICATION", "RECOVERY_EMAIL_SIMULATED", "SYSTEM", "Recovery email was simulated; no message left PulseBack.", { providerMessageId: delivery.id, recipient: maskEmail(recovery.customerEmail) });
+    return { ok: true as const, status: "SIMULATED" as const, provider: "mock" as const, providerMessageId: delivery.id, message: "Recovery email was simulated. No external message was sent." };
   }
 
   async getDashboard(

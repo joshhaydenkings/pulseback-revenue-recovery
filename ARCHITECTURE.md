@@ -53,6 +53,18 @@ Excluded: names, email, phone, card data, full provider identifiers, API keys, w
 - Late authorization cancels pending contact and marks self-recovery
 - Hosted AI never runs inside the action executor or Recovery Lab
 
+## Recovery email boundary
+
+`recoveryCaseId → server reload → Guardian/contact checks → persisted-link verification → notification claim → provider adapter → persisted outcome`
+
+- React never supplies the customer address, amount, subject, body, or CTA URL.
+- The server reloads the customer, payment, policy, contact counts, decision, and active `RecoveryAction` from PostgreSQL.
+- Only an unexpired persisted HTTPS Razorpay link on `rzp.io` or a Razorpay-owned host can enter the deterministic template.
+- `Notification.idempotencyKey` is unique in PostgreSQL, and Resend receives the same provider idempotency key.
+- The record becomes `SENDING` before the network call. Provider acceptance becomes `SENT`; failures store one bounded retry and escalate after two attempts.
+- Contact memory changes only after a real provider acceptance. Mock simulations never pretend customer contact occurred.
+- Recovery Lab and the in-memory demo repository always use the mock notification adapter.
+
 ## Hosted runtime
 
 ```mermaid
@@ -68,4 +80,4 @@ flowchart LR
 
 Public mutation routes consume shared PostgreSQL rate-limit buckets. The signed Razorpay webhook is excluded from arbitrary throttling and continues to rely on raw-body HMAC verification plus durable idempotency. Client-facing route errors are generic; redacted diagnostics remain server-side.
 
-Email execution is behind `NotificationProvider`. This phase resolves it only to `MockNotificationProvider`, so no email, SMS, or WhatsApp message leaves PulseBack. A real email adapter is the next planned integration.
+Email execution is behind `NotificationProvider`. Resend is the optional real email adapter; incomplete configuration falls back to `MockNotificationProvider`. SMS and WhatsApp remain unconnected.

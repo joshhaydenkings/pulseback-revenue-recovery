@@ -1,13 +1,15 @@
 import { getAIIntegrationStatus } from './ai-integration-service';
 import { getDatabaseHealthStatus } from './database-health-service';
 import { getRazorpayIntegrationStatus } from './razorpay-integration-service';
+import { getNotificationIntegrationStatus } from './notification-integration-service';
 import { getSiteUrl, publicSiteUrlConfigured } from '../lib/site-url';
 
 export async function getSystemReadiness() {
-  const [database, razorpay, ai] = await Promise.all([
+  const [database, razorpay, ai, email] = await Promise.all([
     getDatabaseHealthStatus(),
     getRazorpayIntegrationStatus(),
     getAIIntegrationStatus(),
+    getNotificationIntegrationStatus(),
   ]);
   const publicSiteConfigured = publicSiteUrlConfigured();
   const ready =
@@ -15,6 +17,7 @@ export async function getSystemReadiness() {
     razorpay.status === 'connected' &&
     razorpay.webhookConfigured &&
     ai.status === 'connected' &&
+    email.configured &&
     publicSiteConfigured;
   return {
     status: ready ? ('ready' as const) : ('degraded' as const),
@@ -43,6 +46,11 @@ export async function getSystemReadiness() {
       model: ai.model,
       lastSuccessfulDecisionAt: ai.lastSuccessfulAIDecision ?? null,
     },
-    email: { status: 'simulated' as const },
+    email: {
+      provider: email.activeProvider === 'resend' ? 'Resend' : 'Mock',
+      status: email.configured ? ('connected' as const) : ('simulated' as const),
+      testRecipientConfigured: email.testRecipientConfigured,
+      lastSentAt: email.lastSentAt,
+    },
   };
 }

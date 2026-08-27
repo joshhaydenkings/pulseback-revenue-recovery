@@ -1,4 +1,4 @@
-# Five-minute Phase 4 demo script
+# Five-minute PulseBack demo script
 
 ## 0:00 — Integration status
 
@@ -29,6 +29,16 @@ Refresh the page and show that the case, decisions, actions, and audit remain. R
 ## 4:25 — Deterministic benchmark
 
 Open `/lab`, run seed `PULSEBACK-2026`, and identify it as a reproducible synthetic benchmark. Recovery Lab intentionally does not call hosted AI; only the run summary persists.
+
+## Optional Phase 6 email proof
+
+1. Open `/integrations` and show **Resend Connected** or honestly show **Mock Fallback**.
+2. Use **Send fixed test email** only when the server-side test recipient is configured.
+3. Open a non-terminal case that already has a Razorpay Test Payment Link.
+4. Preview **Customer Communication** and point out the masked recipient, exact amount, and persisted link.
+5. Send once and show `RECOVERY_EMAIL_SENT` plus the provider message ID in the audit trail.
+6. Send again and show `DUPLICATE_RECOVERY_EMAIL_IGNORED` with no second provider send.
+7. Never describe provider acceptance as inbox delivery.
 
 ## 4:50 — Close
 

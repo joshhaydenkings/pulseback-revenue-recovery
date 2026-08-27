@@ -102,6 +102,29 @@ export interface DueActionResult {
   skipped: number;
 }
 
+export interface RecoveryEmailPreview {
+  caseId: string;
+  recipient: string;
+  subject: string;
+  html: string;
+  text: string;
+  paymentLinkUrl: string;
+  amountPaise: number;
+  provider: "mock" | "resend";
+  canSend: boolean;
+  blockedReasons: string[];
+  previousStatus?: string;
+  previousSentAt?: string;
+}
+
+export interface RecoveryEmailResult {
+  ok: true;
+  status: "SENT" | "SIMULATED" | "DUPLICATE" | "SUPPRESSED" | "FAILED";
+  message: string;
+  provider: "mock" | "resend";
+  providerMessageId?: string;
+}
+
 export interface RecoveryRepository {
   readonly kind: "postgresql" | "demo-memory";
   listCases(): Promise<RecoveryCase[]>;
@@ -120,6 +143,8 @@ export interface RecoveryRepository {
   ): Promise<CaseCommandResult>;
   reanalyzeCase(caseId: string): Promise<CaseCommandResult>;
   processDueActions(now?: Date): Promise<DueActionResult>;
+  getRecoveryEmailPreview(caseId: string): Promise<RecoveryEmailPreview>;
+  sendRecoveryEmail(caseId: string): Promise<RecoveryEmailResult>;
   getDashboard(cases?: RecoveryCase[]): Promise<DashboardSnapshot>;
   saveEvaluation(result: EvaluationResult): Promise<EvaluationRunSummary>;
   listEvaluationRuns(limit?: number): Promise<EvaluationRunSummary[]>;

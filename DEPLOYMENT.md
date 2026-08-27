@@ -58,6 +58,11 @@ GROQ_API_KEY
 GROQ_MODEL
 OPENAI_API_KEY
 OPENAI_MODEL
+EMAIL_PROVIDER
+RESEND_API_KEY
+EMAIL_FROM_ADDRESS
+EMAIL_FROM_NAME
+EMAIL_TEST_RECIPIENT
 CRON_SECRET
 ```
 
@@ -134,9 +139,20 @@ Expected cards:
 - Database: PostgreSQL — Connected
 - Razorpay: Test Mode — Connected
 - AI: Groq — Connected, or clearly marked fallback
-- Email: Simulated
+- Email: Resend Connected, or clearly marked Mock Fallback
 
-## 9. Configure the Razorpay Test webhook
+## 9. Configure Resend recovery email
+
+1. Add and verify a sender domain in Resend. Complete its DNS verification before customer testing.
+2. Create a restricted server-side API key and set `RESEND_API_KEY` in the host secret store.
+3. Set `EMAIL_PROVIDER=resend`, `EMAIL_FROM_ADDRESS`, and `EMAIL_FROM_NAME`.
+4. Set `EMAIL_TEST_RECIPIENT` to a controlled inbox. This fixed destination is the only recipient used by the Integrations test button.
+5. Redeploy, open `/integrations`, and send the fixed test message.
+6. Inspect Resend logs and the PulseBack audit trail. API acceptance is recorded as `SENT`; PulseBack does not label it delivered without delivery confirmation.
+
+Never publish `RESEND_API_KEY`, never prefix it with `NEXT_PUBLIC_`, and never commit it. Resend's shared test sender can only send to the account email; use a verified domain for other recipients. Keep unsubscribe/compliance and domain reputation requirements appropriate to your production use.
+
+## 10. Configure the Razorpay Test webhook
 
 In the Razorpay Dashboard, remain in **Test Mode** and create this webhook:
 
@@ -155,7 +171,7 @@ Set a webhook secret and place the same value in `RAZORPAY_WEBHOOK_SECRET`. Enab
 
 The route reads the raw request body, verifies Razorpay HMAC before parsing or mutation, and uses the persisted provider event ID for idempotency. Do not place this endpoint behind a body-transforming proxy.
 
-## 10. Verify Groq
+## 11. Verify Groq
 
 Configure:
 
@@ -167,7 +183,7 @@ GROQ_MODEL=openai/gpt-oss-20b
 
 Open `/integrations` and confirm Groq, the configured model, and the last successful decision. The key stays server-side. If Groq is unavailable, PulseBack records the fallback reason and uses the deterministic engine; Guardian remains the only execution authority.
 
-## 11. Configure cron
+## 12. Configure cron
 
 Schedule an HTTPS request every 1–5 minutes:
 
@@ -178,7 +194,7 @@ Authorization: Bearer YOUR_CRON_SECRET
 
 The endpoint fails closed when `CRON_SECRET` is missing, re-validates Guardian and current case state, and returns real `processed`, `succeeded`, `failed`, and `skipped` counts. It is provider-neutral and can be called by any scheduler that supports an Authorization header.
 
-## 12. Public judge test
+## 13. Public judge test
 
 1. Open deployed PulseBack.
 2. Confirm PostgreSQL Connected on `/integrations`.
@@ -201,7 +217,7 @@ The endpoint fails closed when `CRON_SECRET` is missing, re-validates Guardian a
 19. Confirm no duplicate case, action, or recovered revenue appears.
 20. Check `/audit` for the complete append-only history.
 
-## 13. Security and operational notes
+## 14. Security and operational notes
 
 - Public mutation routes use PostgreSQL-backed fixed-window counters, so limits are shared across horizontally scaled instances. The zero-config memory limiter is labeled demo-only.
 - Webhook protection relies on Razorpay HMAC plus database idempotency and is not subject to arbitrary rate blocking.

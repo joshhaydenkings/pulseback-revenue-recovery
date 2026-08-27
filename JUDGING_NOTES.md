@@ -21,7 +21,7 @@
 - Razorpay calls are genuine only in Test Mode with complete Test credentials.
 - Live Razorpay keys and real money are prohibited by this build.
 - Automated provider tests use injected fake responses and spend no credits.
-- Email and SMS remain simulated.
+- Email is genuine only when the UI shows **Resend Connected** and a controlled manual test has been received; otherwise it is simulated. SMS remains unconnected.
 - Recovery Lab is deterministic synthetic evidence, not a production performance claim and not an AI call.
 
 ## Strongest proof
@@ -31,3 +31,6 @@
 3. Re-analyze and prove no action executed automatically.
 4. Remove the selected provider key and show an explicit persisted fallback without breaking the pipeline.
 5. Restart the app and replay a provider event; state and duplicate protection remain durable.
+6. Preview a recovery email, send it once, then prove a repeated click is suppressed by database idempotency.
+
+The recovery-email endpoint is not an open relay: the browser supplies only a case ID. Recipient, content, amount, and CTA are reloaded from trusted server state. Do not claim inbox delivery from a Resend API acceptance.

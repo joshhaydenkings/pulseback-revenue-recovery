@@ -23,6 +23,7 @@ AI never executes a payment operation, bypasses policy, changes money, or contro
 - Re-analysis creates a new decision and pending plan but never executes a financial action automatically.
 - Razorpay Test Orders, signed webhooks, and Test Payment Links use the genuine provider adapter when Test credentials are configured.
 - PostgreSQL uniqueness and transactional writes preserve exact-once event handling across restarts.
+- Resend can send a controlled recovery email containing the exact persisted Razorpay Test Payment Link; notification status, provider ID, retries, and idempotency are stored in PostgreSQL.
 
 ## Safe fallback
 
@@ -80,9 +81,23 @@ RAZORPAY_WEBHOOK_SECRET
 
 Both key IDs must be the same `rzp_test_...` value. Configure the Test webhook as `https://YOUR_PUBLIC_HOST/api/webhooks/razorpay` and subscribe to `payment.failed`, `payment.authorized`, `payment.captured`, `payment_link.paid`, `payment_link.expired`, and `payment_link.cancelled`.
 
+## Recovery email configuration
+
+PulseBack uses a server-only provider abstraction. Resend is the real email adapter; missing or incomplete configuration falls back to an explicitly simulated mock adapter.
+
+```text
+EMAIL_PROVIDER=resend
+RESEND_API_KEY
+EMAIL_FROM_ADDRESS
+EMAIL_FROM_NAME=PulseBack Recovery
+EMAIL_TEST_RECIPIENT
+```
+
+Verify `EMAIL_FROM_ADDRESS` in Resend before sending to customers. A Resend test-domain sender is restricted to the address associated with the Resend account. The browser never submits a recipient, body, amount, or CTA URL: it submits only the recovery case ID, and the server reloads all trusted values from PostgreSQL. A provider acceptance is displayed as **sent/accepted**, never as delivered unless a provider delivery event confirms it.
+
 ## PostgreSQL
 
-Amounts are integer paise. Prisma persists merchants, customers, provider orders, payments, cases, decisions, actions, audit events, webhook idempotency, policies, and evaluation summaries.
+Amounts are integer paise. Prisma persists merchants, customers, provider orders, payments, cases, decisions, actions, notification deliveries, audit events, webhook idempotency, policies, and evaluation summaries.
 
 - Local Node/PostgreSQL: `DATABASE_DRIVER=pg`, `DATABASE_RUNTIME=node`, `npm run dev:postgres`.
 - Sites/Cloudflare: Neon with `DATABASE_DRIVER=neon`, `DATABASE_RUNTIME=workerd`; use the pooled URL for `DATABASE_URL` and direct URL for `DIRECT_URL`.
@@ -92,7 +107,7 @@ The Prisma client is cached per runtime instance to avoid needless connection po
 ## Hosted readiness and security
 
 - `GET /api/health` returns only safe connection states, provider names, model names, and timestamps. It never returns credentials, keys, or secrets.
-- The Integrations page distinguishes PostgreSQL Connected/Demo/Unavailable, Razorpay Test, hosted AI/fallback, and simulated email.
+- The Integrations page distinguishes PostgreSQL Connected/Demo/Unavailable, Razorpay Test, hosted AI/fallback, and Resend/mock email.
 - Public mutation routes use shared PostgreSQL rate-limit buckets when the database is configured. The in-memory limiter exists only for the zero-config demo fallback.
 - The Razorpay webhook keeps raw-body HMAC verification and database idempotency; it is not blocked by arbitrary request throttling.
 - Security headers include MIME sniffing protection, a strict referrer policy, same-origin frame protection, a restrictive permissions policy, and HSTS on configured HTTPS builds. A CSP is intentionally deferred because an incomplete policy could break Razorpay Checkout.
@@ -110,7 +125,7 @@ npm run build
 npm audit --omit=dev
 ```
 
-Tests use injected fake provider response boundaries; they never consume API credits. A live AI request is available only through the Demo Console when a key is configured.
+Tests use injected fake provider response boundaries; they never consume API credits or send email. A live AI request is available only through the Demo Console when a key is configured.
 
 ## Main routes
 

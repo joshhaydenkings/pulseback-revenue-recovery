@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { AppShell } from "../../../components/app-shell";
 import { CaseActions } from "../../../components/interactive/case-actions";
+import { CustomerCommunication } from "../../../components/interactive/customer-communication";
 import { StatusBadge } from "../../../components/status-badge";
 import { evaluateGuardian } from "../../../domain/guardian/evaluate";
 import { formatCurrency } from "../../../lib/format";
@@ -346,6 +347,10 @@ export default async function RecoveryDetail({
               Guardian authorized
             </div>
           </section>
+          <CustomerCommunication
+            caseId={c.id}
+            hasPaymentLink={Boolean(c.activePaymentLinkId && c.activePaymentLinkUrl)}
+          />
           <section className="panel timeline-panel">
             <div className="panel-head">
               <div>

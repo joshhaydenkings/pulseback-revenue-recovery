@@ -48,6 +48,16 @@ enum ActionStatus {
   SKIPPED
 }
 
+enum NotificationStatus {
+  PENDING
+  SENDING
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  SUPPRESSED
+}
+
 model Merchant {
   id                        String         @id
   name                      String
@@ -62,6 +72,7 @@ model Merchant {
   recoveryCases             RecoveryCase[]
   auditEvents               AuditEvent[]
   providerOrders            ProviderOrder[]
+  notifications             Notification[]
   policy                    Policy?
 }
 
@@ -82,6 +93,7 @@ model Customer {
   payments                Payment[]
   recoveryCases           RecoveryCase[]
   providerOrders          ProviderOrder[]
+  notifications           Notification[]
 
   @@unique([merchantId, externalCustomerId])
   @@index([merchantId])
@@ -141,6 +153,7 @@ model RecoveryCase {
   decisions                    RecoveryDecision[]
   actions                      RecoveryAction[]
   auditEvents                  AuditEvent[]
+  notifications                Notification[]
 
   @@index([merchantId, status])
   @@index([nextActionAt])
@@ -193,6 +206,38 @@ model RecoveryAction {
   @@index([status, scheduledFor])
   @@index([recoveryCaseId, status])
   @@unique([providerReference])
+}
+
+model Notification {
+  id                 String             @id
+  merchantId         String
+  customerId         String
+  recoveryCaseId     String
+  channel            String             @default("EMAIL")
+  template           String             @default("RECOVERY_PAYMENT_LINK_V1")
+  provider           String
+  providerMessageId  String?
+  status             NotificationStatus @default(PENDING)
+  recipientMasked    String
+  idempotencyKey     String             @unique
+  attemptCount       Int                @default(0)
+  maxAttempts        Int                @default(2)
+  nextRetryAt        DateTime?
+  sentAt             DateTime?
+  deliveredAt        DateTime?
+  failedAt           DateTime?
+  errorCode          String?
+  errorMessage       String?
+  metadata           Json?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  merchant           Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer           Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  recoveryCase       RecoveryCase       @relation(fields: [recoveryCaseId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@index([recoveryCaseId, createdAt])
+  @@index([status, nextRetryAt])
 }
 
 model ProviderOrder {

@@ -11,7 +11,10 @@ import { evaluateGuardian } from "../domain/guardian/evaluate";
 import { getPrisma, retryDatabaseRead } from "../lib/db/prisma";
 import { formatInrPaise } from "../lib/money";
 import { absoluteSiteUrl } from "../lib/site-url";
-import { resolveNotificationProvider } from "../lib/notifications/notification-provider";
+import {
+  getPostgresRecoveryEmailPreview,
+  sendPostgresRecoveryEmail,
+} from "../services/recovery-email-service";
 import { resolveRecoveryDecision } from "../lib/ai/decision-engine";
 import { buildRecoveryDecisionContext } from "../lib/ai/recovery-decision-context";
 import {
@@ -53,6 +56,7 @@ const caseInclude = {
   merchant: true,
   decisions: { orderBy: { createdAt: "desc" as const }, take: 1 },
   actions: { orderBy: { createdAt: "desc" as const } },
+  notifications: { orderBy: { createdAt: "desc" as const } },
   auditEvents: { orderBy: { createdAt: "asc" as const } },
 } satisfies Prisma.RecoveryCaseInclude;
 type CaseRecord = Prisma.RecoveryCaseGetPayload<{
@@ -102,12 +106,21 @@ function actor(value: string): TimelineEvent["actor"] {
 function toDomain(record: CaseRecord): RecoveryCase {
   const latest = record.decisions[0];
   const recoveryAttempts = record.attempts;
+  const now = Date.now();
+  const sentNotifications = record.notifications.filter(
+    (item) =>
+      ["SENT", "DELIVERED"].includes(item.status) && Boolean(item.sentAt),
+  );
   const memory: CustomerMemory = {
     successfulPayments: record.customer.totalSuccessfulPayments,
     failedPayments: record.customer.totalFailedPayments,
     recoveryAttempts,
-    contacts24h: 0,
-    contacts7d: 0,
+    contacts24h: sentNotifications.filter(
+      (item) => now - item.sentAt!.getTime() <= 24 * 60 * 60 * 1000,
+    ).length,
+    contacts7d: sentNotifications.filter(
+      (item) => now - item.sentAt!.getTime() <= 7 * 24 * 60 * 60 * 1000,
+    ).length,
     previousRecoveries: Math.min(record.customer.totalSuccessfulPayments, 3),
     fatigueScore: record.customer.recoveryFatigueScore,
     preferredMethod: record.payment.paymentMethod,
@@ -1516,13 +1529,20 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
             action.providerStatus ?? "created",
           ),
       );
-      if (recovery.activePaymentLinkId && activeLink)
+      const pendingEmail = recovery.actions.find(
+        (action) =>
+          action.type === "SEND_EMAIL_REMINDER" &&
+          ["PENDING", "SCHEDULED", "APPROVED"].includes(action.status),
+      );
+      if (recovery.activePaymentLinkId && activeLink && !pendingEmail)
         return { reused: true as const, recovery, action: activeLink };
       if (recovery.status === "AWAITING_APPROVAL")
         throw new Error("Merchant approval is required before execution");
-      const pending = recovery.actions.find((action) =>
-        ["PENDING", "SCHEDULED", "APPROVED"].includes(action.status),
-      );
+      const pending =
+        pendingEmail ??
+        recovery.actions.find((action) =>
+          ["PENDING", "SCHEDULED", "APPROVED"].includes(action.status),
+        );
       if (!pending) {
         if (recovery.actions.some((action) => action.status === "EXECUTING"))
           throw new Error("Action execution is already in progress");
@@ -1639,92 +1659,10 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       };
     }
     if ("notification" in claim) {
-      try {
-        const delivery = await resolveNotificationProvider().sendRecoveryEmail({
-          recoveryCaseId: caseId,
-          customer: {
-            name: claim.recovery.customer.name,
-            email: claim.recovery.customer.email,
-          },
-          amountPaise: claim.recovery.payment.amount,
-        });
-        await prisma.$transaction(async (tx) => {
-          await tx.recoveryAction.update({
-            where: { id: claim.action.id },
-            data: {
-              status: "SUCCEEDED",
-              executedAt: new Date(),
-              providerReference: delivery.id,
-              providerStatus: delivery.status,
-              metadata: {
-                simulated: delivery.simulated,
-                provider: "mock-notification",
-              },
-            },
-          });
-          await tx.recoveryCase.update({
-            where: { id: caseId },
-            data: {
-              status: "RECOVERING",
-              attempts: { increment: 1 },
-              nextActionAt: null,
-            },
-          });
-          await this.createAudit(
-            tx,
-            caseId,
-            "NOTIFICATION",
-            "RECOVERY_EMAIL_SIMULATED",
-            "SYSTEM",
-            "Recovery email delivery was simulated; no message left PulseBack.",
-            { actionId: claim.action.id, simulated: true },
-          );
-        });
-        const updated = await this.getCase(caseId);
-        if (!updated)
-          throw new Error("Recovery case disappeared after mutation");
-        return {
-          ok: true,
-          case: updated,
-          message: "Recovery email was simulated and persisted.",
-        };
-      } catch (error) {
-        await prisma.$transaction(async (tx) => {
-          await tx.recoveryAction.update({
-            where: { id: claim.action.id },
-            data: {
-              status: "FAILED",
-              executedAt: new Date(),
-              errorCode: "NOTIFICATION_PROVIDER_FAILURE",
-              errorMessage: "Notification provider failed",
-            },
-          });
-          await tx.recoveryCase.update({
-            where: { id: caseId },
-            data: { status: "ESCALATED", nextActionAt: null },
-          });
-          await this.createAudit(
-            tx,
-            caseId,
-            "NOTIFICATION",
-            "RECOVERY_EMAIL_FAILED",
-            "SYSTEM",
-            "Notification provider failed safely; the case was escalated.",
-            { actionId: claim.action.id },
-          );
-        });
-        console.error('[PulseBack:notification-provider]', {
-          name: error instanceof Error ? error.name : typeof error,
-        });
-        const updated = await this.getCase(caseId);
-        if (!updated)
-          throw new Error("Recovery case disappeared after mutation");
-        return {
-          ok: true,
-          case: updated,
-          message: "Notification provider failed safely; the case was escalated.",
-        };
-      }
+      const delivery = await this.sendRecoveryEmail(caseId);
+      const updated = await this.getCase(caseId);
+      if (!updated) throw new Error("Recovery case disappeared after mutation");
+      return { ok: true, case: updated, message: delivery.message };
     }
     const metadata =
       claim.action.metadata &&
@@ -1770,6 +1708,7 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
               ...metadata,
               provider: selection.kind,
               referenceId,
+              amountPaise: claim.recovery.payment.amount,
             } as Prisma.InputJsonValue,
           },
         });
@@ -1871,6 +1810,14 @@ export class PrismaRecoveryRepository implements RecoveryRepository {
       }
     }
     return result;
+  }
+
+  async getRecoveryEmailPreview(caseId: string) {
+    return getPostgresRecoveryEmailPreview(caseId);
+  }
+
+  async sendRecoveryEmail(caseId: string) {
+    return sendPostgresRecoveryEmail(caseId);
   }
 
   async getDashboard(

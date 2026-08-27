@@ -95,8 +95,21 @@ export function isTransientDatabaseReadError(error: unknown) {
   return (
     candidate.code === 'P1001' ||
     candidate.code === 'P1017' ||
+    candidate.code === 'ECONNREFUSED' ||
     /connection(?:\s+was)?\s+closed|connectionclosed/i.test(error.message)
   );
+}
+
+async function resetPrismaConnection() {
+  const current = globalThis.__pulseBackPrismaPromise;
+  globalThis.__pulseBackPrismaPromise = undefined;
+  if (!current) return;
+  try {
+    const client = await current;
+    await client.$disconnect();
+  } catch {
+    // A broken pool may also reject disconnect; the next call creates a new one.
+  }
 }
 
 export async function retryDatabaseRead<T>(operation: () => Promise<T>) {
@@ -104,6 +117,7 @@ export async function retryDatabaseRead<T>(operation: () => Promise<T>) {
     return await operation();
   } catch (error) {
     if (!isTransientDatabaseReadError(error)) throw error;
+    await resetPrismaConnection();
     await new Promise((resolve) => setTimeout(resolve, 75));
     return operation();
   }

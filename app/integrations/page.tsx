@@ -14,16 +14,19 @@ import { PageHeader } from "../../components/page-header";
 import { getRazorpayIntegrationStatus } from "../../services/razorpay-integration-service";
 import { getAIIntegrationStatus } from "../../services/ai-integration-service";
 import { getDatabaseHealthStatus } from "../../services/database-health-service";
+import { getNotificationIntegrationStatus } from "../../services/notification-integration-service";
+import { NotificationTestButton } from "../../components/interactive/notification-test-button";
 import {
   publicSiteUrlConfigured,
   razorpayWebhookUrl,
 } from "../../lib/site-url";
 
 export default async function Integrations() {
-  const [database, razor, ai] = await Promise.all([
+  const [database, razor, ai, notifications] = await Promise.all([
     getDatabaseHealthStatus(),
     getRazorpayIntegrationStatus(),
     getAIIntegrationStatus(),
+    getNotificationIntegrationStatus(),
   ]);
   const connected = razor.status === "connected";
   const razorState = connected
@@ -145,16 +148,24 @@ export default async function Integrations() {
         <Integration
           name="Notifications"
           icon={<Mail />}
-          state="demo"
-          badge="SIMULATED"
-          description="Customer recovery contact adapters. No messages leave demo mode."
+          state={notifications.configured ? "connected" : "demo"}
+          badge={notifications.configured ? "RESEND CONNECTED" : "MOCK FALLBACK"}
+          description={notifications.configured ? "Real email sending is enabled through the server-only Resend adapter." : "No external email provider is active; sends are safely simulated."}
           rows={[
-            ["Email", "Simulated delivery"],
-            ["SMS", "Simulated delivery"],
+            ["Provider", notifications.activeProvider === "resend" ? "Resend" : "Mock"],
+            ["Configuration", notifications.configured ? "Ready" : notifications.reason ?? "Demo fallback"],
+            ["Sender", notifications.from ?? "Not configured"],
+            ["Test recipient", notifications.testRecipientConfigured ? "Configured server-side" : "Not configured"],
+            ["Accepted sends", String(notifications.sent)],
+            ["Failed sends", String(notifications.failed)],
+            ["Last accepted send", notifications.lastSentAt ? new Date(notifications.lastSentAt).toLocaleString("en-IN") : "—"],
+            ["SMS / WhatsApp", "Not connected"],
             ["Contact fatigue", "Guardian enforced"],
           ]}
-          env={[]}
-        />
+          env={["EMAIL_PROVIDER", "RESEND_API_KEY", "EMAIL_FROM_ADDRESS", "EMAIL_FROM_NAME", "EMAIL_TEST_RECIPIENT"]}
+        >
+          <NotificationTestButton enabled={notifications.configured && notifications.testRecipientConfigured} />
+        </Integration>
       </div>
       <section className="integration-security">
         <ShieldCheck size={21} />
@@ -195,6 +206,7 @@ function Integration({
   description,
   rows,
   env,
+  children,
 }: {
   name: string;
   icon: React.ReactNode;
@@ -203,6 +215,7 @@ function Integration({
   description: string;
   rows: string[][];
   env: string[];
+  children?: React.ReactNode;
 }) {
   const connected = state === "connected";
   return (
@@ -240,6 +253,7 @@ function Integration({
           ))}
         </div>
       )}
+      {children}
       <a className="secondary-button" href="/settings">
         Configuration guide <ExternalLink size={13} />
       </a>
